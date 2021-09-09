@@ -48,7 +48,7 @@ void cst_set_val(mod *m, float val) {
 #define OCC_OUT_SQU 3
 void occ_tick(mod *m, float theta) { 
 	float freq_in = get_input(m, OCC_IN_FREQ); 
-	m->outputs[OCC_OUT_SIN] = sin(theta * freq_in);
+	m->outputs[OCC_OUT_SIN] = 0.5 + 0.5 * sin(theta * freq_in);
 }
 int make_occ(mod *m) {
 	m->inputs = malloc(sizeof(mod*));
@@ -90,6 +90,8 @@ void vcf_tick(mod *m, float theta) {
 	float sig = get_input(m, VCF_IN_SIG);
 	vcf_data *data = (vcf_data*)m->data;
 
+	//printf("cut %f, res %f, sig %f\n", cut, res, sig);
+
 	float tmp;
 	// Pull data from the last stage
 	for(int i = vcf_stages -1; i > 0; i--) {
@@ -114,7 +116,7 @@ int make_vcf(mod *m) {
 }
 /*************************/
 
-const int nmods = 8;
+const int nmods = 10;
 mod *setup_network() {
 	static mod *mods = NULL;
 
@@ -129,7 +131,7 @@ mod *setup_network() {
 	mods[1].inputs[OCC_IN_FREQ] = &mods[0];
 	mods[1].input_idxs[OCC_IN_FREQ] = CST_OUT_VAL;
 
-	/* control occilator */
+	/* VCA control occilator */
 	make_cst(&mods[2]);
 	make_occ(&mods[3]);
 
@@ -145,21 +147,29 @@ mod *setup_network() {
 	mods[4].inputs[VCA_IN_SIG] = &mods[1];
 	mods[4].input_idxs[VCA_IN_SIG] = OCC_OUT_SIN;
 
-	/* VCF */
+	/* VCF control occilator */
 	make_cst(&mods[5]);
-	make_cst(&mods[6]);
-	make_vcf(&mods[7]);
+	make_occ(&mods[6]);
 
-	cst_set_val(&mods[5], 0.25f);
-	cst_set_val(&mods[6], 0.0f);
-	mods[7].inputs[VCF_IN_CUT] = &mods[5];
-	mods[7].input_idxs[VCF_IN_CUT] = CST_OUT_VAL;
+	cst_set_val(&mods[5], 2.0f);
+	mods[6].inputs[OCC_IN_FREQ] = &mods[5];
+	mods[6].input_idxs[OCC_IN_FREQ] = CST_OUT_VAL;
 
-	mods[7].inputs[VCF_IN_RES] = &mods[6];
-	mods[7].input_idxs[VCF_IN_RES] = CST_OUT_VAL;
+	/* VCF */
+	make_cst(&mods[7]);
+	make_cst(&mods[8]);
+	make_vcf(&mods[9]);
 
-	mods[7].inputs[VCF_IN_SIG] = &mods[4];
-	mods[7].input_idxs[VCF_IN_SIG] = VCA_OUT_SIG;
+	cst_set_val(&mods[7], 0.25f);
+	cst_set_val(&mods[8], 0.0f);
+	mods[9].inputs[VCF_IN_CUT] = &mods[6];
+	mods[9].input_idxs[VCF_IN_CUT] = VCF_OUT_SIG;
+
+	mods[9].inputs[VCF_IN_RES] = &mods[8];
+	mods[9].input_idxs[VCF_IN_RES] = CST_OUT_VAL;
+
+	mods[9].inputs[VCF_IN_SIG] = &mods[4];
+	mods[9].input_idxs[VCF_IN_SIG] = VCA_OUT_SIG;
 
 	return mods;
 }
@@ -173,8 +183,8 @@ int fill_buffer(float *buf) {
 		for(int mi = 0; mi < nmods; mi++)
 			mods[mi].tick(&mods[mi], theta);
 		//buf[i] = mods[3].outputs[OCC_OUT_SIN];
-		buf[i] = mods[nmods-1].outputs[VCA_OUT_SIG];
-//		printf("%i %f\n", i, buf[i]);
+		buf[i] = mods[nmods-1].outputs[VCF_OUT_SIG];
+	//	printf("%i %f\n", i, buf[i]);
 		theta += M_PI * 1.0 / rate;
 	}
 	return 0;
