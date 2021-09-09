@@ -60,7 +60,7 @@ int make_occ(mod *m) {
 
 #define VCA_IN_CV 0
 #define VCA_IN_SIG 1
-#define VCA_OUT_SIG 2
+#define VCA_OUT_SIG 0
 void vca_tick(mod *m, float theta) {
 	float in_cv = get_input(m, VCA_IN_CV);
 	float in_sig = get_input(m, VCA_IN_SIG);
@@ -78,7 +78,7 @@ int make_vca(mod *m) {
 #define VCF_IN_CUT 0
 #define VCF_IN_RES 1
 #define VCF_IN_SIG 2
-#define VCF_OUT_SIG 3
+#define VCF_OUT_SIG 0
 #define vcf_stages 4
 typedef struct vcf_data {
 	float sn[vcf_stages]; // s(n)
@@ -168,17 +168,15 @@ int fill_buffer(float *buf) {
 
 	mod *mods = setup_network();
 
-	printf("fill_buffer\n");
 	/****/
 	for(int i = 0; i < buffer_size; i++) {
 		for(int mi = 0; mi < nmods; mi++)
 			mods[mi].tick(&mods[mi], theta);
 		//buf[i] = mods[3].outputs[OCC_OUT_SIN];
-		buf[i] = mods[7].outputs[VCF_OUT_SIG];
+		buf[i] = mods[nmods-1].outputs[VCA_OUT_SIG];
 //		printf("%i %f\n", i, buf[i]);
 		theta += M_PI * 1.0 / rate;
 	}
-	printf("filled_buffer\n");
 	return 0;
 }
 
@@ -284,7 +282,6 @@ int main(int argc, char **argv) {
 		} else if (pcm < 0) {
 			printf("ERROR. Can't write to PCM device. %s\n", snd_strerror(pcm));
 		}
-		printf("wrotei\n");
 	}
 
 	snd_pcm_drain(pcm_handle);
