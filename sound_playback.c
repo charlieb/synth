@@ -8,7 +8,7 @@
 #define M_PI 3.1415f
 #endif
 
-int rate; // samples per second
+unsigned int rate; // samples per second
 float theta; // angle in radians at time t - convert seconds to Hz
 int buffer_size; // use a constant buffer size and sample rate across everything
 
@@ -75,10 +75,52 @@ int make_vca(mod *m) {
 	return 0;
 }
 
+#define VCF_IN_CUT 0
+#define VCF_IN_RES 1
+#define VCF_IN_SIG 2
+#define VCF_OUT_SIG 3
+#define vcf_stages 4
+typedef struct vcf_data {
+	float sn[vcf_stages]; // s(n)
+	float snm1[vcf_stages]; // s(n-1)
+} vcf_data;
+void vcf_tick(mod *m, float theta) {
+	float cut = get_input(m, VCF_IN_CUT);
+	float res = get_input(m, VCF_IN_RES);
+	float sig = get_input(m, VCF_IN_SIG);
+	vcf_data *data = (vcf_data*)m->data;
+
+	float tmp;
+	// Pull data from the last stage
+	for(int i = vcf_stages -1; i > 0; i--) {
+		tmp = data->sn[i];
+		data->sn[i] = data->sn[i-1] * cut + data->snm1[i] * (1.0f - cut);
+		data->snm1[i] = tmp;
+	}
+	tmp = data->sn[0];
+	data->sn[0] = sig * cut + data->snm1[0] * (1.0f - cut) + data->snm1[vcf_stages-1] * res;
+
+	m->outputs[VCF_OUT_SIG] = data->sn[vcf_stages -1];
+}
+int make_vcf(mod *m) {
+	m->inputs = malloc(3 * sizeof(mod*));
+	m->input_idxs = malloc(3 * sizeof(int));
+	m->outputs = malloc(sizeof(float));
+	m->tick = &vcf_tick;
+	m->data = (void*)malloc(sizeof(vcf_data));
+	memset(m->data, 0, sizeof(vcf_data));
+
+	return 0;
+}
 /*************************/
 
-int fill_buffer(float *buf) {
-	mod mods[5];
+const int nmods = 8;
+mod *setup_network() {
+	static mod *mods = NULL;
+
+	if(mods) return mods;
+	mods = malloc(nmods * sizeof(mod));
+
 	/* Tone occilator */
 	make_cst(&mods[0]);
 	make_occ(&mods[1]);
@@ -103,14 +145,40 @@ int fill_buffer(float *buf) {
 	mods[4].inputs[VCA_IN_SIG] = &mods[1];
 	mods[4].input_idxs[VCA_IN_SIG] = OCC_OUT_SIN;
 
+	/* VCF */
+	make_cst(&mods[5]);
+	make_cst(&mods[6]);
+	make_vcf(&mods[7]);
 
+	cst_set_val(&mods[5], 0.25f);
+	cst_set_val(&mods[6], 0.0f);
+	mods[7].inputs[VCF_IN_CUT] = &mods[5];
+	mods[7].input_idxs[VCF_IN_CUT] = CST_OUT_VAL;
+
+	mods[7].inputs[VCF_IN_RES] = &mods[6];
+	mods[7].input_idxs[VCF_IN_RES] = CST_OUT_VAL;
+
+	mods[7].inputs[VCF_IN_SIG] = &mods[4];
+	mods[7].input_idxs[VCF_IN_SIG] = VCA_OUT_SIG;
+
+	return mods;
+}
+
+int fill_buffer(float *buf) {
+
+	mod *mods = setup_network();
+
+	printf("fill_buffer\n");
+	/****/
 	for(int i = 0; i < buffer_size; i++) {
-		for(int mi = 0; mi < 5; mi++)
+		for(int mi = 0; mi < nmods; mi++)
 			mods[mi].tick(&mods[mi], theta);
 		//buf[i] = mods[3].outputs[OCC_OUT_SIN];
-		buf[i] = mods[4].outputs[VCA_OUT_SIG];
+		buf[i] = mods[7].outputs[VCF_OUT_SIG];
+//		printf("%i %f\n", i, buf[i]);
 		theta += M_PI * 1.0 / rate;
 	}
+	printf("filled_buffer\n");
 	return 0;
 }
 
@@ -125,7 +193,7 @@ void to_sound(int16_t *ibuf, float *fbuf) {
 /*  ^^^^ 0.0 -> 1.0+  ^^^^ vvvv -32767 -> 32767 vvvv */
 
 int main(int argc, char **argv) {
-	unsigned int pcm, tmp, dir;
+	unsigned int pcm, tmp;
 	int channels, seconds;
 	snd_pcm_t *pcm_handle;
 	snd_pcm_hw_params_t *params;
@@ -144,8 +212,8 @@ int main(int argc, char **argv) {
 	seconds  = atoi(argv[2]);
 
 	/* Open the PCM device in playback mode */
-	if (pcm = snd_pcm_open(&pcm_handle, PCM_DEVICE,
-					SND_PCM_STREAM_PLAYBACK, 0) < 0) 
+	if ((pcm = snd_pcm_open(&pcm_handle, PCM_DEVICE,
+					SND_PCM_STREAM_PLAYBACK, 0)) < 0) 
 		printf("ERROR: Can't open \"%s\" PCM device. %s\n",
 					PCM_DEVICE, snd_strerror(pcm));
 
@@ -155,23 +223,23 @@ int main(int argc, char **argv) {
 	snd_pcm_hw_params_any(pcm_handle, params);
 
 	/* Set parameters */
-	if (pcm = snd_pcm_hw_params_set_access(pcm_handle, params,
-					SND_PCM_ACCESS_RW_INTERLEAVED) < 0) 
+	if ((pcm = snd_pcm_hw_params_set_access(pcm_handle, params,
+					SND_PCM_ACCESS_RW_INTERLEAVED)) < 0) 
 		printf("ERROR: Can't set interleaved mode. %s\n", snd_strerror(pcm));
 
-	if (pcm = snd_pcm_hw_params_set_format(pcm_handle, params,
-						SND_PCM_FORMAT_S16_LE) < 0) 
+	if ((pcm = snd_pcm_hw_params_set_format(pcm_handle, params,
+						SND_PCM_FORMAT_S16_LE)) < 0) 
 		printf("ERROR: Can't set format. %s\n", snd_strerror(pcm));
 
 
-	if (pcm = snd_pcm_hw_params_set_channels(pcm_handle, params, channels) < 0) 
+	if ((pcm = snd_pcm_hw_params_set_channels(pcm_handle, params, channels)) < 0) 
 		printf("ERROR: Can't set channels number. %s\n", snd_strerror(pcm));
 
-	if (pcm = snd_pcm_hw_params_set_rate_near(pcm_handle, params, &rate, 0) < 0) 
+	if ((pcm = snd_pcm_hw_params_set_rate_near(pcm_handle, params, &rate, 0)) < 0) 
 		printf("ERROR: Can't set rate. %s\n", snd_strerror(pcm));
 
 	/* Write parameters */
-	if (pcm = snd_pcm_hw_params(pcm_handle, params) < 0)
+	if ((pcm = snd_pcm_hw_params(pcm_handle, params)) < 0)
 		printf("ERROR: Can't set harware parameters. %s\n", snd_strerror(pcm));
 
 	/* Resume information */
@@ -210,14 +278,13 @@ int main(int argc, char **argv) {
 		fill_buffer(fbuf);
 		to_sound(buff, fbuf);
 		
-
-		if (pcm = snd_pcm_writei(pcm_handle, buff, frames) == -EPIPE) {
+		if ((pcm = snd_pcm_writei(pcm_handle, buff, frames)) == -EPIPE) {
 			printf("XRUN.\n");
 			snd_pcm_prepare(pcm_handle);
 		} else if (pcm < 0) {
 			printf("ERROR. Can't write to PCM device. %s\n", snd_strerror(pcm));
 		}
-
+		printf("wrotei\n");
 	}
 
 	snd_pcm_drain(pcm_handle);
