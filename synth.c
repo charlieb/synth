@@ -329,7 +329,7 @@ void *synth_main_loop(void *synth_data) {
 		sound.tv_nsec = (long)((sound_secs - floor(sound_secs)) * (float)nano);
 		timespec_diff(&sound, &elapsed, &pause);
 
-		if(pause.tv_sec > 0) {
+		if(pause.tv_sec > 3) {
 			printf("Clock too far out of sync\n");
 			abort();
 		}
