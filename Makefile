@@ -1,11 +1,11 @@
 CC=gcc
-CFLAGS=--std=c99 -pedantic -Wall `pkg-config --cflags gtk4`
+CFLAGS=--std=c99 -pedantic -Wall `pkg-config --cflags gtk+-3.0`
 SOURCES=$(wildcard *.c)
 OBJECTS=$(SOURCES:.c=.o)
 DEST=.
 EXE=play
 INCLUDES=
-LIBS=-lm -lasound `pkg-config --libs gtk4`
+LIBS=-lm -lasound `pkg-config --libs gtk+-3.0`
 
 .c.o:
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@

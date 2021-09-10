@@ -1,17 +1,76 @@
 #include <gtk/gtk.h>
 #include <pthread.h>
+#include <math.h>
+#include <stdio.h>
 
 #include "synth.h"
 
-static void on_activate (GtkApplication *app) {
-	// Create a new window
-	GtkWidget *window = gtk_application_window_new (app);
-	// Create a new button
-	GtkWidget *button = gtk_button_new_with_label ("Hello, World!");
-	// When the button is clicked, close the window passed as an argument
-	g_signal_connect_swapped (button, "clicked", G_CALLBACK (gtk_window_close), window);
-	gtk_window_set_child (GTK_WINDOW (window), button);
-	gtk_window_present (GTK_WINDOW (window));
+typedef struct freq_adjustment {
+	GtkAdjustment *adj;
+	GtkLabel *label;
+	int mod_id;
+} freq_adjustment;
+
+float logmap(float min_in, float max_in, float min_out, float max_out, float value) {
+	float unit_val = (value - min_in) / (max_in - min_in);
+	float min_log10 = log10(min_out);
+	float max_log10 = log10(max_out - min_out);
+	return pow(10, min_log10 + unit_val*(max_log10 - min_log10));
+}
+
+static void high_freq_scale_set_value(GApplication *app, gpointer data) {
+	static char label_text[10] = {0,};
+	freq_adjustment *adj = data;
+	float hz = logmap(0., 1., 200, 10000., gtk_adjustment_get_value(adj->adj));
+	printf("%f -> %f\n", gtk_adjustment_get_value(adj->adj), hz);
+	
+	sprintf(label_text, "%.2f Hz", hz);
+	gtk_label_set_text(adj->label, label_text);
+	set_mod_value(adj->mod_id, hz);
+}
+
+GtkWidget *high_freq_scale(int mod_id) {
+	GtkBox *box = (GtkBox*)gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+
+	GtkLabel *label = (GtkLabel*) gtk_label_new("880 Hz");
+	gtk_box_pack_end(box, (GtkWidget*)label, 0, 1, 2);
+	
+	GtkAdjustment *adj = gtk_adjustment_new(0.5, 0., 1., 0.01, 0.01, 0.01);
+	GtkWidget *scl = gtk_scale_new(GTK_ORIENTATION_HORIZONTAL, adj);
+	gtk_scale_set_draw_value((GtkScale*)scl, 0);
+	gtk_box_pack_end(box, scl, 1, 1, 2);
+
+	freq_adjustment *freq_adj = malloc(sizeof(freq_adjustment));
+	freq_adj->adj = adj;
+	freq_adj->label = label;
+	freq_adj->mod_id = 0;
+	high_freq_scale_set_value(NULL, freq_adj);
+
+	g_signal_connect(adj, "value-changed", G_CALLBACK(high_freq_scale_set_value), freq_adj);
+	return (GtkWidget*)box;
+}
+
+static void on_app_activate(GApplication *app, gpointer data) {
+	// create a new application window for the application
+  // GtkApplication is sub-class of GApplication
+  // downcast GApplication* to GtkApplication* with GTK_APPLICATION() macro
+  GtkWidget *window = gtk_application_window_new(GTK_APPLICATION(app));
+
+	GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+	gtk_container_add(GTK_CONTAINER(window), vbox);
+
+//  // a simple push button
+//	GtkWidget *btn = gtk_button_new_with_label("Click Me!");
+//	// connect the event-handler for "clicked" signal of button
+//	g_signal_connect(btn, "clicked", G_CALLBACK(gtk_window_close), window);
+//	// add the button to the window
+//	gtk_container_add(GTK_CONTAINER(vbox), btn);
+
+
+	gtk_container_add(GTK_CONTAINER(vbox), high_freq_scale(0));
+
+	// display the window
+	gtk_widget_show_all(GTK_WIDGET(window));
 }
 
 int main (int argc, char *argv[]) {
@@ -27,7 +86,7 @@ int main (int argc, char *argv[]) {
 	// Create a new application
 	GtkApplication *app = gtk_application_new ("com.example.GtkApplication",
 			G_APPLICATION_FLAGS_NONE);
-	g_signal_connect(app, "activate", G_CALLBACK (on_activate), NULL);
+	g_signal_connect(app, "activate", G_CALLBACK (on_app_activate), NULL);
 	int app_ret = g_application_run (G_APPLICATION (app), argc, argv);
 
 	printf("Closing\n");
@@ -36,6 +95,8 @@ int main (int argc, char *argv[]) {
 	pthread_mutex_unlock(&synth->alive_mtx);
 
 	pthread_join(synth_thread, NULL);
+
+	g_object_unref(app);
 
 	return app_ret;
 }

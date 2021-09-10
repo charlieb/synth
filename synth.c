@@ -165,11 +165,12 @@ int make_otp(mod *m) {
 
 /*************************/
 
-const int nmods = 11;
-mod *setup_network() {
-	static mod *mods = NULL;
+static const int nmods = 11;
+static mod *mods = NULL;
 
-	if(mods) return mods;
+void setup_network() {
+
+	if(mods) return;
 	mods = malloc(nmods * sizeof(mod));
 
 	/* Tone occilator */
@@ -226,8 +227,10 @@ mod *setup_network() {
 	make_otp(&mods[10]);
 	mods[10].inputs[OTP_IN] = &mods[9];
 	mods[10].input_idxs[OTP_IN] = VCF_OUT_SIG;
+}
 
-	return mods;
+void set_mod_value(int mod_id, float val) {
+	cst_set_val(&mods[mod_id], val);
 }
 
 /*  ^^^^ 0.0 -> 1.0+  ^^^^ vvvv -32767 -> 32767 vvvv */
@@ -302,7 +305,7 @@ void *synth_main_loop(void *synth_data) {
 
 	init_pcm();
 
-	mod *mods = setup_network();
+	setup_network();
 	uint32_t frames_calced = 0;
 	float sound_secs;
 	struct timespec start, now, elapsed, pause, sound;

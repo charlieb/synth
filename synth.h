@@ -8,5 +8,6 @@ typedef struct synth_thread_data {
 
 } synth_thread_data;
 void *synth_main_loop(void *synth_data);
+void set_mod_value(int mod_id, float val);
 
 #endif
