@@ -1,16 +1,24 @@
+#include "synth.h"
 #include <alsa/asoundlib.h>
 #include <stdio.h>
 #include <math.h>
+#include <time.h>
 
 #define PCM_DEVICE "default"
 
 #ifndef M_PI
 #define M_PI 3.1415f
 #endif
+#ifndef alloca
+#define alloca(x)  __builtin_alloca(x)
+#endif
 
-unsigned int rate; // samples per second
-float theta; // angle in radians at time t - convert seconds to Hz
-int buffer_size; // use a constant buffer size and sample rate across everything
+unsigned int rate = 44100; // samples per second
+float theta = 0; // angle in radians at time t - convert seconds to Hz
+
+snd_pcm_t *pcm_handle;
+snd_pcm_hw_params_t *params;
+snd_pcm_uframes_t frames;
 
 #define NOT_READY 0
 #define READY 1
@@ -114,9 +122,50 @@ int make_vcf(mod *m) {
 
 	return 0;
 }
+
+#define OTP_IN 0
+typedef struct otp_data {
+	float *fbuf;
+	int16_t *ibuf;
+	int i;
+} otp_data;
+void otp_tick(mod *m, float theta) {
+	unsigned int pcm;
+	float in = get_input(m, OTP_IN);
+	otp_data *data = (otp_data*)m->data;
+	data->fbuf[data->i++] = in;
+
+	// Time to dump the data into the audio buffer?
+	if(data->i == frames) {
+		for(int i = 0; i < frames; i++) {
+			data->ibuf[i] = (int16_t)(data->fbuf[i] * 32767.0f);
+			//printf("%f -> %i\n", data->fbuf[i], data->ibuf[i]);
+		}
+		if ((pcm = snd_pcm_writei(pcm_handle, data->ibuf, frames)) == -EPIPE) {
+			printf("XRUN.\n");
+			snd_pcm_prepare(pcm_handle);
+		} else if (pcm < 0) {
+			printf("ERROR. Can't write to PCM device. %s\n", snd_strerror(pcm));
+		}
+		data->i = 0;
+	}
+}
+int make_otp(mod *m) {
+	m->inputs = malloc(sizeof(mod*));
+	m->input_idxs = malloc(sizeof(int));
+	m->outputs = NULL;
+	m->tick = &otp_tick;
+	otp_data *data = (otp_data*)malloc(sizeof(otp_data));
+	data->fbuf = (float*)malloc(frames * sizeof(float));
+	data->ibuf = (int16_t*)malloc(frames * sizeof(int));
+	data->i = 0;
+	m->data = (void*)data;
+	return 0;
+}
+
 /*************************/
 
-const int nmods = 10;
+const int nmods = 11;
 mod *setup_network() {
 	static mod *mods = NULL;
 
@@ -151,7 +200,7 @@ mod *setup_network() {
 	make_cst(&mods[5]);
 	make_occ(&mods[6]);
 
-	cst_set_val(&mods[5], 2.0f);
+	cst_set_val(&mods[5], 1.0f);
 	mods[6].inputs[OCC_IN_FREQ] = &mods[5];
 	mods[6].input_idxs[OCC_IN_FREQ] = CST_OUT_VAL;
 
@@ -163,7 +212,9 @@ mod *setup_network() {
 	cst_set_val(&mods[7], 0.25f);
 	cst_set_val(&mods[8], 0.0f);
 	mods[9].inputs[VCF_IN_CUT] = &mods[6];
-	mods[9].input_idxs[VCF_IN_CUT] = VCF_OUT_SIG;
+	mods[9].input_idxs[VCF_IN_CUT] = OCC_OUT_SIN;
+	//mods[9].inputs[VCF_IN_CUT] = &mods[7];
+	//mods[9].input_idxs[VCF_IN_CUT] = CST_OUT_VAL;
 
 	mods[9].inputs[VCF_IN_RES] = &mods[8];
 	mods[9].input_idxs[VCF_IN_RES] = CST_OUT_VAL;
@@ -171,63 +222,27 @@ mod *setup_network() {
 	mods[9].inputs[VCF_IN_SIG] = &mods[4];
 	mods[9].input_idxs[VCF_IN_SIG] = VCA_OUT_SIG;
 
+	/* OUTPUT */
+	make_otp(&mods[10]);
+	mods[10].inputs[OTP_IN] = &mods[9];
+	mods[10].input_idxs[OTP_IN] = VCF_OUT_SIG;
+
 	return mods;
 }
 
-int fill_buffer(float *buf) {
-
-	mod *mods = setup_network();
-
-	/****/
-	for(int i = 0; i < buffer_size; i++) {
-		for(int mi = 0; mi < nmods; mi++)
-			mods[mi].tick(&mods[mi], theta);
-		//buf[i] = mods[3].outputs[OCC_OUT_SIN];
-		buf[i] = mods[nmods-1].outputs[VCF_OUT_SIG];
-	//	printf("%i %f\n", i, buf[i]);
-		theta += M_PI * 1.0 / rate;
-	}
-	return 0;
-}
-
 /*  ^^^^ 0.0 -> 1.0+  ^^^^ vvvv -32767 -> 32767 vvvv */
 
-void to_sound(int16_t *ibuf, float *fbuf) {
-	for(int i = 0; i < buffer_size; i++) {
-		ibuf[i] = (int16_t)(fbuf[i] * 32767.0f);
-	}
-}
-
-/*  ^^^^ 0.0 -> 1.0+  ^^^^ vvvv -32767 -> 32767 vvvv */
-
-int main(int argc, char **argv) {
+void init_pcm() {
 	unsigned int pcm, tmp;
-	int channels, seconds;
-	snd_pcm_t *pcm_handle;
-	snd_pcm_hw_params_t *params;
-	snd_pcm_uframes_t frames;
-	int16_t *buff;
-	int loops;
-
-	if (argc < 3) {
-		printf("Usage: %s <sample_rate> <seconds>\n",
-								argv[0]);
-		return -1;
-	}
-
-	rate 	 = atoi(argv[1]);
-	channels = 1;// atoi(argv[2]);
-	seconds  = atoi(argv[2]);
 
 	/* Open the PCM device in playback mode */
 	if ((pcm = snd_pcm_open(&pcm_handle, PCM_DEVICE,
 					SND_PCM_STREAM_PLAYBACK, 0)) < 0) 
 		printf("ERROR: Can't open \"%s\" PCM device. %s\n",
-					PCM_DEVICE, snd_strerror(pcm));
+				PCM_DEVICE, snd_strerror(pcm));
 
 	/* Allocate parameters object and fill it with default values*/
 	snd_pcm_hw_params_alloca(&params);
-
 	snd_pcm_hw_params_any(pcm_handle, params);
 
 	/* Set parameters */
@@ -236,11 +251,12 @@ int main(int argc, char **argv) {
 		printf("ERROR: Can't set interleaved mode. %s\n", snd_strerror(pcm));
 
 	if ((pcm = snd_pcm_hw_params_set_format(pcm_handle, params,
-						SND_PCM_FORMAT_S16_LE)) < 0) 
+					SND_PCM_FORMAT_S16_LE)) < 0) 
 		printf("ERROR: Can't set format. %s\n", snd_strerror(pcm));
 
 
-	if ((pcm = snd_pcm_hw_params_set_channels(pcm_handle, params, channels)) < 0) 
+	/* mono only */
+	if ((pcm = snd_pcm_hw_params_set_channels(pcm_handle, params, 1)) < 0) 
 		printf("ERROR: Can't set channels number. %s\n", snd_strerror(pcm));
 
 	if ((pcm = snd_pcm_hw_params_set_rate_near(pcm_handle, params, &rate, 0)) < 0) 
@@ -251,7 +267,7 @@ int main(int argc, char **argv) {
 		printf("ERROR: Can't set harware parameters. %s\n", snd_strerror(pcm));
 
 	/* Resume information */
-  printf("PCM Sample size %i bits\n", snd_pcm_hw_params_get_sbits(params));
+	printf("PCM Sample size %i bits\n", snd_pcm_hw_params_get_sbits(params));
 
 	printf("PCM name: '%s'\n", snd_pcm_name(pcm_handle));
 
@@ -268,35 +284,66 @@ int main(int argc, char **argv) {
 	snd_pcm_hw_params_get_rate(params, &tmp, 0);
 	printf("rate: %d bps\n", tmp);
 
-	printf("seconds: %d\n", seconds);	
-
-	/* Allocate buffer to hold single period */
 	snd_pcm_hw_params_get_period_size(params, &frames, 0);
+}
 
-	buffer_size = frames * channels /* 2 -> sample size */;
-	buff = (int16_t *) malloc(buffer_size * sizeof(int16_t));
+// NB does not work when b > a, it needs to underflow into the second part.
+static inline void timespec_diff(struct timespec *a, struct timespec *b, struct timespec *result) {
+    result->tv_sec = a->tv_sec - b->tv_sec;
+    result->tv_nsec = a->tv_nsec - b->tv_nsec;
+}
 
-	float *fbuf = (float *)malloc(buffer_size * sizeof(float));
+void *synth_main_loop(void *synth_data) {
 
-	snd_pcm_hw_params_get_period_time(params, &tmp, NULL);
+	synth_thread_data *thread_data = (synth_thread_data*)synth_data;
+	pthread_mutex_lock(&thread_data->alive_mtx);
+	char alive = thread_data->alive;
+	pthread_mutex_unlock(&thread_data->alive_mtx);
 
-	theta = 0;
-	for (loops = (seconds * 1000000) / tmp; loops > 0; loops--) {
+	init_pcm();
 
-		fill_buffer(fbuf);
-		to_sound(buff, fbuf);
+	mod *mods = setup_network();
+	uint32_t frames_calced = 0;
+	float sound_secs;
+	struct timespec start, now, elapsed, pause, sound;
+	long nano = 1000000000;
+	long max_sync_diff = 0.25 * nano;
+
+	clock_gettime(CLOCK_REALTIME, &start);
+
+	while(alive) {
+	
+		for(int i = 0; i < nmods; i++)
+			mods[i].tick(&mods[i], theta);
+		theta += M_PI * 1.0 / rate;
+
+		frames_calced++;
+		clock_gettime(CLOCK_REALTIME, &now);
+		timespec_diff(&now, &start, &elapsed);
 		
-		if ((pcm = snd_pcm_writei(pcm_handle, buff, frames)) == -EPIPE) {
-			printf("XRUN.\n");
-			snd_pcm_prepare(pcm_handle);
-		} else if (pcm < 0) {
-			printf("ERROR. Can't write to PCM device. %s\n", snd_strerror(pcm));
+		sound_secs = (float)frames_calced / (float)rate;
+		sound.tv_sec = (time_t)sound_secs;
+		sound.tv_nsec = (long)((sound_secs - floor(sound_secs)) * (float)nano);
+		timespec_diff(&sound, &elapsed, &pause);
+
+		if(pause.tv_sec > 0) {
+			printf("Clock too far out of sync\n");
+			abort();
 		}
+		if(pause.tv_nsec > max_sync_diff) {
+			pause.tv_nsec -= max_sync_diff / 2;
+			nanosleep(&pause, NULL);
+		}
+
+		pthread_mutex_lock(&thread_data->alive_mtx);
+		alive = thread_data->alive;
+		pthread_mutex_unlock(&thread_data->alive_mtx);
 	}
+	printf("Closing synth\n");
 
 	snd_pcm_drain(pcm_handle);
 	snd_pcm_close(pcm_handle);
-	free(buff);
 
-	return 0;
+	printf("Exiting synth\n");
+	return NULL;
 }
