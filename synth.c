@@ -165,7 +165,7 @@ int make_otp(mod *m) {
 
 /*************************/
 
-static const int nmods = 11;
+static const int nmods = 13;
 static mod *mods = NULL;
 
 void setup_network() {
@@ -189,44 +189,59 @@ void setup_network() {
 	mods[3].inputs[OCC_IN_FREQ] = &mods[2];
 	mods[3].input_idxs[OCC_IN_FREQ] = CST_OUT_VAL;
 
-	/* VCA */
-	make_vca(&mods[4]);
-	mods[4].inputs[VCA_IN_CV] = &mods[3];
-	mods[4].input_idxs[VCA_IN_CV] = OCC_OUT_SIN;
+	/* VCA Occilator attenuator */
+	make_cst(&mods[4]);
+	make_vca(&mods[5]);
 
-	mods[4].inputs[VCA_IN_SIG] = &mods[1];
-	mods[4].input_idxs[VCA_IN_SIG] = OCC_OUT_SIN;
+	cst_set_val(&mods[4], 100.0f);
+	mods[5].inputs[VCA_IN_CV] = &mods[4];
+	mods[5].input_idxs[VCA_IN_CV] = CST_OUT_VAL;
+
+	mods[5].inputs[VCA_IN_SIG] = &mods[3];
+	mods[5].input_idxs[VCA_IN_SIG] = OCC_OUT_SIN;
+
+	/* VCA */
+	make_vca(&mods[6]);
+	mods[6].inputs[VCA_IN_CV] = &mods[5];
+	mods[6].input_idxs[VCA_IN_CV] = VCA_OUT_SIG;
+
+	mods[6].inputs[VCA_IN_SIG] = &mods[1];
+	mods[6].input_idxs[VCA_IN_SIG] = OCC_OUT_SIN;
 
 	/* VCF control occilator */
-	make_cst(&mods[5]);
-	make_occ(&mods[6]);
+	make_cst(&mods[7]);
+	make_occ(&mods[8]);
 
-	cst_set_val(&mods[5], 1.0f);
-	mods[6].inputs[OCC_IN_FREQ] = &mods[5];
-	mods[6].input_idxs[OCC_IN_FREQ] = CST_OUT_VAL;
+	cst_set_val(&mods[7], 1.0f);
+	mods[8].inputs[OCC_IN_FREQ] = &mods[7];
+	mods[8].input_idxs[OCC_IN_FREQ] = CST_OUT_VAL;
 
 	/* VCF */
-	make_cst(&mods[7]);
-	make_cst(&mods[8]);
-	make_vcf(&mods[9]);
+	make_cst(&mods[9]);
+	make_cst(&mods[10]);
+	make_vcf(&mods[11]);
 
-	cst_set_val(&mods[7], 0.25f);
-	cst_set_val(&mods[8], 0.0f);
-	mods[9].inputs[VCF_IN_CUT] = &mods[6];
-	mods[9].input_idxs[VCF_IN_CUT] = OCC_OUT_SIN;
+	cst_set_val(&mods[9], 0.25f);
+	cst_set_val(&mods[10], 0.0f);
+	mods[11].inputs[VCF_IN_CUT] = &mods[8];
+	mods[11].input_idxs[VCF_IN_CUT] = OCC_OUT_SIN;
 	//mods[9].inputs[VCF_IN_CUT] = &mods[7];
 	//mods[9].input_idxs[VCF_IN_CUT] = CST_OUT_VAL;
 
-	mods[9].inputs[VCF_IN_RES] = &mods[8];
-	mods[9].input_idxs[VCF_IN_RES] = CST_OUT_VAL;
+	mods[11].inputs[VCF_IN_RES] = &mods[10];
+	mods[11].input_idxs[VCF_IN_RES] = CST_OUT_VAL;
 
-	mods[9].inputs[VCF_IN_SIG] = &mods[4];
-	mods[9].input_idxs[VCF_IN_SIG] = VCA_OUT_SIG;
+	mods[11].inputs[VCF_IN_SIG] = &mods[6];
+	mods[11].input_idxs[VCF_IN_SIG] = VCA_OUT_SIG;
 
 	/* OUTPUT */
-	make_otp(&mods[10]);
-	mods[10].inputs[OTP_IN] = &mods[9];
-	mods[10].input_idxs[OTP_IN] = VCF_OUT_SIG;
+	make_otp(&mods[12]);
+	//mods[12].inputs[OTP_IN] = &mods[1];
+	//mods[12].input_idxs[OTP_IN] = OCC_OUT_SIN;
+	mods[12].inputs[OTP_IN] = &mods[6];
+	mods[12].input_idxs[OTP_IN] = VCA_OUT_SIG;
+	//mods[12].inputs[OTP_IN] = &mods[11];
+	//mods[12].input_idxs[OTP_IN] = VCF_OUT_SIG;
 }
 
 void set_mod_value(int mod_id, float val) {
@@ -318,7 +333,7 @@ void *synth_main_loop(void *synth_data) {
 	
 		for(int i = 0; i < nmods; i++)
 			mods[i].tick(&mods[i], theta);
-		theta += M_PI * 1.0 / rate;
+		theta += M_PI * 2.0 / rate;
 
 		frames_calced++;
 		clock_gettime(CLOCK_REALTIME, &now);
