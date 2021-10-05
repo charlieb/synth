@@ -37,7 +37,7 @@ GtkWidget *high_freq_scale(int mod_id) {
 	GtkLabel *label = (GtkLabel*) gtk_label_new("880 Hz");
 	gtk_box_pack_end(box, (GtkWidget*)label, 0, 1, 2);
 	
-	GtkAdjustment *adj = gtk_adjustment_new(0.5, 0., 1., 0.01, 0.01, 0.01);
+	GtkAdjustment *adj = gtk_adjustment_new(0.25, 0., 1., 0.01, 0.01, 0.01);
 	GtkWidget *scl = gtk_spin_button_new(adj, 1, 5);
 	gtk_box_pack_end(box, scl, 1, 1, 2);
 
@@ -132,8 +132,8 @@ static void on_app_activate(GApplication *app, gpointer data) {
 	gtk_box_pack_start(vbox, (GtkWidget*)l_vco1, 0, 1, 2);
 	gtk_box_pack_start(vbox, high_freq_scale(0), 0, 1, 2);
 
-	// LFO -> VCA
-	GtkLabel *l_lfo1 = (GtkLabel*) gtk_label_new("LFO -> VCA");
+	// LFO Freq -> VCA
+	GtkLabel *l_lfo1 = (GtkLabel*) gtk_label_new("LFO Freq -> VCA");
 	gtk_box_pack_start(vbox, (GtkWidget*)l_lfo1, 0, 1, 2);
 	gtk_box_pack_start(vbox, low_freq_scale(2), 0, 1, 2);
 
@@ -141,6 +141,11 @@ static void on_app_activate(GApplication *app, gpointer data) {
 	GtkLabel *l_att1 = (GtkLabel*) gtk_label_new("LFO -> VCA Attenuation");
 	gtk_box_pack_start(vbox, (GtkWidget*)l_att1, 0, 1, 2);
 	gtk_box_pack_start(vbox, percentage_scale(4), 0, 1, 2);
+
+	// VCA Base Attenuation
+	GtkLabel *l_att2 = (GtkLabel*) gtk_label_new("VCA Base Attenuation");
+	gtk_box_pack_start(vbox, (GtkWidget*)l_att2, 0, 1, 2);
+	gtk_box_pack_start(vbox, percentage_scale(6), 0, 1, 2);
 
 //	// Base VCF Frequency
 //	GtkLabel *l_vco2 = (GtkLabel*) gtk_label_new("LP VCF");
@@ -166,10 +171,16 @@ int main (int argc, char *argv[]) {
 	pthread_t synth_thread;
 
 	synth_thread_data *synth = malloc(sizeof(synth_thread_data));
-	synth->alive = 1;
 	pthread_mutex_init(&synth->alive_mtx, NULL);
-
 	pthread_create(&synth_thread, NULL, synth_main_loop, (void*)synth);
+
+	// Wait for the synth thread to startup
+	int synth_alive = 0;
+	while(!synth_alive) {
+		pthread_mutex_lock(&synth->alive_mtx);
+		synth_alive = synth->alive;
+		pthread_mutex_unlock(&synth->alive_mtx);
+	}
 
 	// Create a new application
 	GtkApplication *app = gtk_application_new ("com.example.GtkApplication",

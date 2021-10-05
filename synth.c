@@ -13,6 +13,11 @@
 #define alloca(x)  __builtin_alloca(x)
 #endif
 
+#define debug_print(fmt, ...) \
+	do { if(DEBUG) printf(fmt, __VA_ARGS__); } while(0)
+
+#define DEBUG 1
+
 unsigned int rate = 44100; // samples per second
 float theta = 0; // angle in radians at time t - convert seconds to Hz
 
@@ -49,6 +54,23 @@ void cst_set_val(mod *m, float val) {
 	*(float*)m->data = val;
 }
 
+#define ADD_IN1 0
+#define ADD_IN2 1
+#define ADD_OUT_VAL 0
+void add_tick(mod *m, float _) {
+	float a1 = get_input(m, ADD_IN1); 
+	float a2 = get_input(m, ADD_IN2); 
+	debug_print("ADD %p - %f + %f = %f\n", (void*)m, a1, a2, a1 + a2);
+	m->outputs[ADD_OUT_VAL] = a1 + a2;
+}
+int make_add(mod *m) {
+	m->inputs = malloc(2 * sizeof(mod*));
+	m->input_idxs = malloc(2 * sizeof(int));
+	m->outputs = malloc(sizeof(float));
+	m->tick = &add_tick;
+	return 0;
+}
+
 #define OCC_IN_FREQ 0
 #define OCC_OUT_SIN 0
 #define OCC_OUT_TRI 1
@@ -56,7 +78,9 @@ void cst_set_val(mod *m, float val) {
 #define OCC_OUT_SQU 3
 void occ_tick(mod *m, float theta) { 
 	float freq_in = get_input(m, OCC_IN_FREQ); 
-	m->outputs[OCC_OUT_SIN] = 0.5 + 0.5 * sin(theta * freq_in);
+	float sample = 0.5 + 0.5 * sin(theta * freq_in);
+	debug_print("OCC %p - %f @ %f = %f\n", (void*)m, theta, freq_in, sample);
+	m->outputs[OCC_OUT_SIN] = sample;
 }
 int make_occ(mod *m) {
 	m->inputs = malloc(sizeof(mod*));
@@ -73,6 +97,7 @@ void vca_tick(mod *m, float theta) {
 	float in_cv = get_input(m, VCA_IN_CV);
 	float in_sig = get_input(m, VCA_IN_SIG);
 
+	debug_print("VCA %p - %f * %f = %f\n", (void*)m, in_cv, in_sig, in_cv * in_sig);
 	m->outputs[VCA_OUT_SIG] = in_cv * in_sig;
 }
 int make_vca(mod *m) {
@@ -164,7 +189,6 @@ int make_otp(mod *m) {
 }
 
 /*************************/
-
 static const int nmods = 13;
 static mod *mods = NULL;
 
@@ -200,21 +224,32 @@ void setup_network() {
 	mods[5].inputs[VCA_IN_SIG] = &mods[3];
 	mods[5].input_idxs[VCA_IN_SIG] = OCC_OUT_SIN;
 
-	/* VCA */
-	make_vca(&mods[6]);
-	mods[6].inputs[VCA_IN_CV] = &mods[5];
-	mods[6].input_idxs[VCA_IN_CV] = VCA_OUT_SIG;
+	/* ADD LFO VCA Signal */
+	make_cst(&mods[6]);
+	make_add(&mods[7]);
 
-	mods[6].inputs[VCA_IN_SIG] = &mods[1];
-	mods[6].input_idxs[VCA_IN_SIG] = OCC_OUT_SIN;
+	cst_set_val(&mods[6], 0.5f);
+	mods[7].inputs[ADD_IN1] = &mods[6];
+	mods[7].input_idxs[ADD_IN1] = CST_OUT_VAL;
+
+	mods[7].inputs[ADD_IN2] = &mods[5];
+	mods[7].input_idxs[ADD_IN2] = VCA_OUT_SIG;
+
+	/* VCA */
+	make_vca(&mods[8]);
+	mods[8].inputs[VCA_IN_CV] = &mods[7];
+	mods[8].input_idxs[VCA_IN_CV] = ADD_OUT_VAL;
+
+	mods[8].inputs[VCA_IN_SIG] = &mods[1];
+	mods[8].input_idxs[VCA_IN_SIG] = OCC_OUT_SIN;
 
 	/* VCF control occilator */
-	make_cst(&mods[7]);
-	make_occ(&mods[8]);
+	//make_cst(&mods[7]);
+	//make_occ(&mods[8]);
 
-	cst_set_val(&mods[7], 1.0f);
-	mods[8].inputs[OCC_IN_FREQ] = &mods[7];
-	mods[8].input_idxs[OCC_IN_FREQ] = CST_OUT_VAL;
+	//cst_set_val(&mods[7], 1.0f);
+	//mods[8].inputs[OCC_IN_FREQ] = &mods[7];
+	//mods[8].input_idxs[OCC_IN_FREQ] = CST_OUT_VAL;
 
 	/* VCF */
 	make_cst(&mods[9]);
@@ -238,7 +273,7 @@ void setup_network() {
 	make_otp(&mods[12]);
 	//mods[12].inputs[OTP_IN] = &mods[1];
 	//mods[12].input_idxs[OTP_IN] = OCC_OUT_SIN;
-	mods[12].inputs[OTP_IN] = &mods[6];
+	mods[12].inputs[OTP_IN] = &mods[8];
 	mods[12].input_idxs[OTP_IN] = VCA_OUT_SIG;
 	//mods[12].inputs[OTP_IN] = &mods[11];
 	//mods[12].input_idxs[OTP_IN] = VCF_OUT_SIG;
@@ -314,13 +349,17 @@ static inline void timespec_diff(struct timespec *a, struct timespec *b, struct 
 void *synth_main_loop(void *synth_data) {
 
 	synth_thread_data *thread_data = (synth_thread_data*)synth_data;
-	pthread_mutex_lock(&thread_data->alive_mtx);
-	char alive = thread_data->alive;
-	pthread_mutex_unlock(&thread_data->alive_mtx);
 
 	init_pcm();
 
 	setup_network();
+
+	// Init complete, signal the UI thread
+	char alive = 1;
+	pthread_mutex_lock(&thread_data->alive_mtx);
+ 	thread_data->alive = alive;
+	pthread_mutex_unlock(&thread_data->alive_mtx);
+
 	uint32_t frames_calced = 0;
 	float sound_secs;
 	struct timespec start, now, elapsed, pause, sound;
