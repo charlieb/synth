@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <time.h>
+#include <ctype.h>
 
 #define PCM_DEVICE "default"
 
@@ -16,7 +17,7 @@
 #define debug_print(fmt, ...) \
 	do { if(DEBUG) printf(fmt, __VA_ARGS__); } while(0)
 
-#define DEBUG 1
+#define DEBUG 0
 
 unsigned int rate = 44100; // samples per second
 float theta = 0; // angle in radians at time t - convert seconds to Hz
@@ -52,6 +53,26 @@ int make_cst(mod *m) {
 }
 void cst_set_val(mod *m, float val) {
 	*(float*)m->data = val;
+}
+
+#define FAD_IN_SIG1 0
+#define FAD_IN_SIG2 1
+#define FAD_IN_MIX  2
+#define FAD_OUT_VAL 0
+void fad_tick(mod *m, float _) {
+	float s1 = get_input(m, FAD_IN_SIG1); 
+	float s2 = get_input(m, FAD_IN_SIG2); 
+	float mix = get_input(m, FAD_IN_MIX); 
+	float out = s1 * (1 - mix) + s2 * mix;
+	debug_print("FAD %p - %f, %f @ %f%% = %f\n", (void*)m, s1, s2, mix, out);
+	m->outputs[FAD_OUT_VAL] = out;
+}
+int make_fad(mod *m) {
+	m->inputs = malloc(3 * sizeof(mod*));
+	m->input_idxs = malloc(3 * sizeof(int));
+	m->outputs = malloc(sizeof(float));
+	m->tick = &fad_tick;
+	return 0;
 }
 
 #define ADD_IN1 0
@@ -188,6 +209,93 @@ int make_otp(mod *m) {
 	return 0;
 }
 
+/*************************/
+void freadline(char line[255], FILE *f) {
+	while(isspace(fgetc(f)));
+	if(feof(f)) return;
+	fseek(f, -1, SEEK_CUR); 
+	int i = 0;
+	line[i] = fgetc(f);
+	while(line[i] != '\n') 
+		line[++i] = fgetc(f);
+}
+void parse_mod_line(mod *mods, char line[255]) {
+	int i = 0;
+	int n = atoi(line);
+	while(isdigit(line[i++]));
+	printf("%i\n", n);
+	
+	if(0 == strncmp("CST", &line[i], 3)) {
+		make_cst(&mods[n]);
+		i += 4;
+		cst_set_val(&mods[n], atof(&line[i]));
+		while(!isspace(line[i++]));
+
+		if(0 == strncmp("HFO", &line[i], 3)) {
+			printf("HFO\n");
+		}
+		else if(0 == strncmp("LFO", &line[i], 3)) {
+			printf("LFO\n");
+		}
+		else if(0 == strncmp("PER", &line[i], 3)) {
+			printf("PER\n");
+		}
+	}
+	else if(0 == strncmp("OCC", &line[i], 3)) {
+		make_occ(&mods[n]);
+		i += 4;
+		mods[n].inputs[OCC_IN_FREQ] = &mods[atoi(&line[i])];
+		while('.' != line[i++]);
+		mods[n].input_idxs[OCC_IN_FREQ] = atoi(&line[i]);
+	}
+	else if(0 == strncmp("VCA", &line[i], 3)) {
+		make_vca(&mods[n]);
+		i += 4;
+		mods[n].inputs[VCA_IN_CV] = &mods[atoi(&line[i])];
+		while('.' != line[i++]);
+		mods[n].input_idxs[VCA_IN_CV] = atoi(&line[i]);
+
+		while(isdigit(line[i++]));
+
+		mods[n].inputs[VCA_IN_SIG] = &mods[atoi(&line[i])];
+		while('.' != line[i++]);
+		mods[n].input_idxs[VCA_IN_SIG] = atoi(&line[i]);
+
+	}
+}
+#define LINE_MAX_LEN 255
+int load_network(char *filename) {
+	FILE * f = fopen(filename, "r");
+	// Go to the last line and get the highest mod number.
+	fseek(f, 1, SEEK_END);
+	// Ignore whitespace at the end
+	while(isspace(fgetc(f)))
+		fseek(f, -2, SEEK_CUR); 
+	// Move back past the \n
+	fseek(f, -1, SEEK_CUR); 
+	// Find the next carrige return
+	while(fgetc(f) != '\n')
+		fseek(f, -2, SEEK_CUR);
+	// Read the last line
+	char line[LINE_MAX_LEN] = {0,};
+	fread(line, 1, LINE_MAX_LEN, f);
+	// Get the number
+	int nmods = atoi(line) + 1; // Number from 0
+	mod *mods = malloc(nmods * sizeof(mod));
+	printf("nmods : %i\n", nmods);
+
+	rewind(f);
+	while(!feof(f)) {
+		memset(line, 0, LINE_MAX_LEN);
+		freadline(line, f);
+		printf("%s--\n", line);
+		parse_mod_line(mods, line);
+	}
+	
+
+	
+	return 0;
+}
 /*************************/
 static const int nmods = 13;
 static mod *mods = NULL;
@@ -351,6 +459,8 @@ void *synth_main_loop(void *synth_data) {
 	synth_thread_data *thread_data = (synth_thread_data*)synth_data;
 
 	init_pcm();
+
+	load_network("layout.dat");
 
 	setup_network();
 
