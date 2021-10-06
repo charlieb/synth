@@ -8,7 +8,8 @@
 #define PCM_DEVICE "default"
 
 #ifndef M_PI
-#define M_PI 3.1415f
+#define M_PI 3.14159365359879323846
+#define M_2PI 6.28318530718
 #endif
 #ifndef alloca
 #define alloca(x)  __builtin_alloca(x)
@@ -20,7 +21,6 @@
 #define DEBUG 0
 
 unsigned int rate = 44100; // samples per second
-float theta = 0; // angle in radians at time t - convert seconds to Hz
 
 snd_pcm_t *pcm_handle;
 snd_pcm_hw_params_t *params;
@@ -34,7 +34,7 @@ typedef struct mod {
 	struct mod **inputs;
 	int *input_idxs;
 	float *outputs;
-	void (*tick)(struct mod*, float);
+	void (*tick)(struct mod*);
 	void *data;
 } mod;
 
@@ -42,7 +42,7 @@ float get_input(mod *m, int i) { return m->inputs[i]->outputs[m->input_idxs[i]];
 
 /* CONSTANT OUT VALUE */
 #define CST_OUT_VAL 0
-void cst_tick(mod *m, float _) {
+void cst_tick(mod *m) {
 	m->outputs[CST_OUT_VAL] = *(float*)m->data;
 }
 int make_cst(mod *m) {
@@ -59,7 +59,7 @@ void cst_set_val(mod *m, float val) {
 #define FAD_IN_SIG2 1
 #define FAD_IN_MIX  2
 #define FAD_OUT_VAL 0
-void fad_tick(mod *m, float _) {
+void fad_tick(mod *m) {
 	float s1 = get_input(m, FAD_IN_SIG1); 
 	float s2 = get_input(m, FAD_IN_SIG2); 
 	float mix = get_input(m, FAD_IN_MIX); 
@@ -78,7 +78,7 @@ int make_fad(mod *m) {
 #define ADD_IN1 0
 #define ADD_IN2 1
 #define ADD_OUT_VAL 0
-void add_tick(mod *m, float _) {
+void add_tick(mod *m) {
 	float a1 = get_input(m, ADD_IN1); 
 	float a2 = get_input(m, ADD_IN2); 
 	debug_print("ADD %p - %f + %f = %f\n", (void*)m, a1, a2, a1 + a2);
@@ -97,16 +97,26 @@ int make_add(mod *m) {
 #define OCC_OUT_TRI 1
 #define OCC_OUT_SAW 2
 #define OCC_OUT_SQU 3
-void occ_tick(mod *m, float theta) { 
+void occ_tick(mod *m) { 
 	float freq_in = get_input(m, OCC_IN_FREQ); 
-	float sample = 0.5 + 0.5 * sin(theta * freq_in);
-	debug_print("OCC %p - %f @ %f = %f\n", (void*)m, theta, freq_in, sample);
+
+	float phase = *(float*)m->data;
+	phase += freq_in * M_2PI / (float)rate;
+	*(float*)m->data = phase;
+
+	//printf("%f\n", phase);
+	phase += ((phase >= M_2PI) * -M_2PI) + ((phase < 0.0) * M_2PI);
+	float sample = 0.5 + 0.5 * sin(phase);
+	//float sample = 0.5 + 0.5 * sin(theta * freq_in);
+	debug_print("OCC %p - %f @ %f = %f\n", (void*)m, phase, freq_in, sample);
 	m->outputs[OCC_OUT_SIN] = sample;
 }
 int make_occ(mod *m) {
 	m->inputs = malloc(sizeof(mod*));
 	m->input_idxs = malloc(sizeof(int));
 	m->outputs = malloc(4 * sizeof(float));
+	m->data = malloc(sizeof(float));
+	memset(m->data, 0, sizeof(float));
 	m->tick = &occ_tick;
 	return 0;
 }
@@ -114,7 +124,7 @@ int make_occ(mod *m) {
 #define VCA_IN_CV 0
 #define VCA_IN_SIG 1
 #define VCA_OUT_SIG 0
-void vca_tick(mod *m, float theta) {
+void vca_tick(mod *m) {
 	float in_cv = get_input(m, VCA_IN_CV);
 	float in_sig = get_input(m, VCA_IN_SIG);
 
@@ -138,7 +148,7 @@ typedef struct vcf_data {
 	float sn[vcf_stages]; // s(n)
 	float snm1[vcf_stages]; // s(n-1)
 } vcf_data;
-void vcf_tick(mod *m, float theta) {
+void vcf_tick(mod *m) {
 	float cut = get_input(m, VCF_IN_CUT);
 	float res = get_input(m, VCF_IN_RES);
 	float sig = get_input(m, VCF_IN_SIG);
@@ -175,7 +185,7 @@ typedef struct otp_data {
 	int16_t *ibuf;
 	int i;
 } otp_data;
-void otp_tick(mod *m, float theta) {
+void otp_tick(mod *m) {
 	unsigned int pcm;
 	float in = get_input(m, OTP_IN);
 	otp_data *data = (otp_data*)m->data;
@@ -209,6 +219,13 @@ int make_otp(mod *m) {
 	return 0;
 }
 
+/*************************/
+int nmods = 0;
+mod *mods = NULL;
+void init_mods(int n) {
+	nmods = n;
+	mods = malloc(n * sizeof(mod));
+}
 /*************************/
 void freadline(char line[255], FILE *f) {
 	while(isspace(fgetc(f)));
@@ -280,8 +297,7 @@ int load_network(char *filename) {
 	char line[LINE_MAX_LEN] = {0,};
 	fread(line, 1, LINE_MAX_LEN, f);
 	// Get the number
-	int nmods = atoi(line) + 1; // Number from 0
-	mod *mods = malloc(nmods * sizeof(mod));
+	init_mods(atoi(line) + 1); // Number from 0
 	printf("nmods : %i\n", nmods);
 
 	rewind(f);
@@ -292,18 +308,14 @@ int load_network(char *filename) {
 		parse_mod_line(mods, line);
 	}
 	
-
-	
 	return 0;
 }
 /*************************/
-static const int nmods = 13;
-static mod *mods = NULL;
 
 void setup_network() {
 
-	if(mods) return;
-	mods = malloc(nmods * sizeof(mod));
+	init_mods(13);
+
 
 	/* Tone occilator */
 	make_cst(&mods[0]);
@@ -481,8 +493,7 @@ void *synth_main_loop(void *synth_data) {
 	while(alive) {
 	
 		for(int i = 0; i < nmods; i++)
-			mods[i].tick(&mods[i], theta);
-		theta += M_PI * 2.0 / rate;
+			mods[i].tick(&mods[i]);
 
 		frames_calced++;
 		clock_gettime(CLOCK_REALTIME, &now);
