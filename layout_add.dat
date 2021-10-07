@@ -1,0 +1,10 @@
+0 CST 260.5 HFO VCO Freq
+1 OCC 0/0
+2 CST 0.5 LFO LFO Freq
+3 OCC 2/0
+4 CST 0.5 PER LFO Attenuation
+5 VCA 4/0 3/0
+6 CST 0.5 PER LFO Offset
+7 ADD 6/0 5/0
+8 VCA 7/0 1/0
+9 OUT 8/0

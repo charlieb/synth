@@ -228,8 +228,6 @@ void vcf_tick(mod *m) {
 	float sig = get_input(m, VCF_IN_SIG);
 	vcf_data *data = (vcf_data*)m->data;
 
-	//printf("cut %f, res %f, sig %f\n", cut, res, sig);
-
 	float tmp;
 	// Pull data from the last stage
 	for(int i = vcf_stages -1; i > 0; i--) {
@@ -239,6 +237,9 @@ void vcf_tick(mod *m) {
 	}
 	tmp = data->sn[0];
 	data->sn[0] = sig * cut + data->snm1[0] * (1.0f - cut) + data->snm1[vcf_stages-1] * res;
+
+	debug_print("VCF cut %f, res %f, sig %f = %f\n", cut, res, sig,
+			data->sn[vcf_stages -1]);
 
 	m->outputs[VCF_OUT_SIG] = data->sn[vcf_stages -1];
 }
@@ -382,6 +383,25 @@ void parse_mod_line(mod *mods, char line[LINE_MAX_LEN]) {
 		while('/' != line[i++]);
 		mods[n].input_idxs[VCA_IN_SIG] = atoi(&line[i]);
 	}
+	else if(0 == strncmp("VCF", &line[i], 3)) {
+		make_vcf(&mods[n]);
+		i += 4;
+		mods[n].inputs[VCF_IN_CUT] = &mods[atoi(&line[i])];
+		while('/' != line[i++]);
+		mods[n].input_idxs[VCF_IN_CUT] = atoi(&line[i]);
+
+		while(isdigit(line[i++]));
+
+		mods[n].inputs[VCF_IN_RES] = &mods[atoi(&line[i])];
+		while('/' != line[i++]);
+		mods[n].input_idxs[VCF_IN_RES] = atoi(&line[i]);
+
+		while(isdigit(line[i++]));
+
+		mods[n].inputs[VCF_IN_SIG] = &mods[atoi(&line[i])];
+		while('/' != line[i++]);
+		mods[n].input_idxs[VCF_IN_SIG] = atoi(&line[i]);
+	}
 	else if(0 == strncmp("OUT", &line[i], 3)) {
 		make_otp(&mods[n]);
 		i += 4;
@@ -389,6 +409,8 @@ void parse_mod_line(mod *mods, char line[LINE_MAX_LEN]) {
 		while('/' != line[i++]);
 		mods[n].input_idxs[OTP_IN] = atoi(&line[i]);
 	}
+	else
+		printf("Bad module type in: %s\n", line);
 }
 int load_network(char *filename) {
 	FILE * f = fopen(filename, "r");
@@ -420,94 +442,6 @@ int load_network(char *filename) {
 	return 0;
 }
 /*************************/
-
-void setup_network() {
-
-	init_mods(13);
-
-
-	/* Tone occilator */
-	make_cst(&mods[0]);
-	make_occ(&mods[1]);
-
-	cst_set_val(&mods[0], 440.0f);
-	mods[1].inputs[OCC_IN_FREQ] = &mods[0];
-	mods[1].input_idxs[OCC_IN_FREQ] = CST_OUT_VAL;
-
-	/* VCA control occilator */
-	make_cst(&mods[2]);
-	make_occ(&mods[3]);
-
-	cst_set_val(&mods[2], 10.0f);
-	mods[3].inputs[OCC_IN_FREQ] = &mods[2];
-	mods[3].input_idxs[OCC_IN_FREQ] = CST_OUT_VAL;
-
-	/* VCA Occilator attenuator */
-	make_cst(&mods[4]);
-	make_vca(&mods[5]);
-
-	cst_set_val(&mods[4], 100.0f);
-	mods[5].inputs[VCA_IN_CV] = &mods[4];
-	mods[5].input_idxs[VCA_IN_CV] = CST_OUT_VAL;
-
-	mods[5].inputs[VCA_IN_SIG] = &mods[3];
-	mods[5].input_idxs[VCA_IN_SIG] = OCC_OUT_SIN;
-
-	/* ADD LFO VCA Signal */
-	make_cst(&mods[6]);
-	make_add(&mods[7]);
-
-	cst_set_val(&mods[6], 0.5f);
-	mods[7].inputs[ADD_IN1] = &mods[6];
-	mods[7].input_idxs[ADD_IN1] = CST_OUT_VAL;
-
-	mods[7].inputs[ADD_IN2] = &mods[5];
-	mods[7].input_idxs[ADD_IN2] = VCA_OUT_SIG;
-
-	/* VCA */
-	make_vca(&mods[8]);
-	mods[8].inputs[VCA_IN_CV] = &mods[7];
-	mods[8].input_idxs[VCA_IN_CV] = ADD_OUT_VAL;
-
-	mods[8].inputs[VCA_IN_SIG] = &mods[1];
-	mods[8].input_idxs[VCA_IN_SIG] = OCC_OUT_SIN;
-
-	/* VCF control occilator */
-	//make_cst(&mods[7]);
-	//make_occ(&mods[8]);
-
-	//cst_set_val(&mods[7], 1.0f);
-	//mods[8].inputs[OCC_IN_FREQ] = &mods[7];
-	//mods[8].input_idxs[OCC_IN_FREQ] = CST_OUT_VAL;
-
-	/* VCF */
-	make_cst(&mods[9]);
-	make_cst(&mods[10]);
-	make_vcf(&mods[11]);
-
-	cst_set_val(&mods[9], 0.25f);
-	cst_set_val(&mods[10], 0.0f);
-	mods[11].inputs[VCF_IN_CUT] = &mods[8];
-	mods[11].input_idxs[VCF_IN_CUT] = OCC_OUT_SIN;
-	//mods[9].inputs[VCF_IN_CUT] = &mods[7];
-	//mods[9].input_idxs[VCF_IN_CUT] = CST_OUT_VAL;
-
-	mods[11].inputs[VCF_IN_RES] = &mods[10];
-	mods[11].input_idxs[VCF_IN_RES] = CST_OUT_VAL;
-
-	mods[11].inputs[VCF_IN_SIG] = &mods[6];
-	mods[11].input_idxs[VCF_IN_SIG] = VCA_OUT_SIG;
-
-	/* OUTPUT */
-	make_otp(&mods[12]);
-	//mods[12].inputs[OTP_IN] = &mods[1];
-	//mods[12].input_idxs[OTP_IN] = OCC_OUT_SIN;
-	mods[12].inputs[OTP_IN] = &mods[8];
-	mods[12].input_idxs[OTP_IN] = VCA_OUT_SIG;
-	//mods[12].inputs[OTP_IN] = &mods[11];
-	//mods[12].input_idxs[OTP_IN] = VCF_OUT_SIG;
-}
-
 
 /*  ^^^^ 0.0 -> 1.0+  ^^^^ vvvv -32767 -> 32767 vvvv */
 
