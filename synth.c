@@ -20,16 +20,15 @@
 
 #define DEBUG 0
 
+#define LINE_MAX_LEN 255
+
 unsigned int rate = 44100; // samples per second
 
 snd_pcm_t *pcm_handle;
 snd_pcm_hw_params_t *params;
 snd_pcm_uframes_t frames;
 
-#define NOT_READY 0
-#define READY 1
-#define DONE 2
-
+/*************************/
 typedef struct mod {
 	struct mod **inputs;
 	int *input_idxs;
@@ -38,21 +37,70 @@ typedef struct mod {
 	void *data;
 } mod;
 
+int nmods = 0;
+mod *mods = NULL;
+void init_mods(int n) {
+	nmods = n;
+	mods = malloc(n * sizeof(mod));
+}
+/*************************/
+
+
 float get_input(mod *m, int i) { return m->inputs[i]->outputs[m->input_idxs[i]]; }
 
 /* CONSTANT OUT VALUE */
+typedef struct cst_data {
+	char label[LINE_MAX_LEN];
+	char type[3];
+	float init_val;
+	float val;
+} cst_data;
+
 #define CST_OUT_VAL 0
 void cst_tick(mod *m) {
-	m->outputs[CST_OUT_VAL] = *(float*)m->data;
+	m->outputs[CST_OUT_VAL] = ((cst_data*)m->data)->val;
 }
 int make_cst(mod *m) {
 	m->outputs = malloc(sizeof(float));
 	m->tick = &cst_tick;
-	m->data = malloc(sizeof(float));
+	m->data = malloc(sizeof(cst_data));
+	memset(m->data, 0, sizeof(cst_data));
 	return 0;
 }
 void cst_set_val(mod *m, float val) {
-	*(float*)m->data = val;
+	((cst_data*)m->data)->val = val;
+}
+void cst_set_init_val(mod *m, float val) {
+	((cst_data*)m->data)->init_val = val;
+	((cst_data*)m->data)->val = val;
+}
+void cst_set_type(mod *m, char *type) {
+	strncpy(((cst_data*)m->data)->type, type, 3);
+}
+void cst_set_label(mod *m, char *label) {
+	int pos = -1;
+
+	while('\n' != label[++pos])
+		((cst_data*)m->data)->label[pos] = label[pos];
+}
+void cst_print(mod *m) {
+	cst_data *data =((cst_data*)m->data);
+	printf("CST %f %c%c%c %s\n", 
+			data->init_val,
+			data->type[0], data->type[1], data->type[2], 
+			data->label);
+}
+void set_mod_cst_value(int mod_id, float val) {
+	cst_set_val(&mods[mod_id], val);
+}
+char* get_mod_cst_label(int mod_id) {
+	return ((cst_data*)mods[mod_id].data)->label;
+}
+char* get_mod_cst_type(int mod_id) {
+	return ((cst_data*)mods[mod_id].data)->type;
+}
+float get_mod_cst_init_value(int mod_id) {
+	return ((cst_data*)mods[mod_id].data)->init_val;
 }
 
 #define FAD_IN_SIG1 0
@@ -220,14 +268,7 @@ int make_otp(mod *m) {
 }
 
 /*************************/
-int nmods = 0;
-mod *mods = NULL;
-void init_mods(int n) {
-	nmods = n;
-	mods = malloc(n * sizeof(mod));
-}
-/*************************/
-void freadline(char line[255], FILE *f) {
+void freadline(char line[LINE_MAX_LEN], FILE *f) {
 	while(isspace(fgetc(f)));
 	if(feof(f)) return;
 	fseek(f, -1, SEEK_CUR); 
@@ -236,27 +277,29 @@ void freadline(char line[255], FILE *f) {
 	while(line[i] != '\n') 
 		line[++i] = fgetc(f);
 }
-void parse_mod_line(mod *mods, char line[255]) {
+void parse_mod_line(mod *mods, char line[LINE_MAX_LEN]) {
 	int i = 0;
 	int n = atoi(line);
 	while(isdigit(line[i++]));
-	printf("%i\n", n);
 	
 	if(0 == strncmp("CST", &line[i], 3)) {
 		make_cst(&mods[n]);
 		i += 4;
 		cst_set_val(&mods[n], atof(&line[i]));
+		cst_set_init_val(&mods[n], atof(&line[i]));
 		while(!isspace(line[i++]));
 
-		if(0 == strncmp("HFO", &line[i], 3)) {
-			printf("HFO\n");
+		if(0 == strncmp("HFO", &line[i], 3) ||
+			 0 == strncmp("LFO", &line[i], 3) ||
+		   0 == strncmp("PER", &line[i], 3)) {
+			cst_set_type(&mods[n], &line[i]);
+			i += 4;
 		}
-		else if(0 == strncmp("LFO", &line[i], 3)) {
-			printf("LFO\n");
-		}
-		else if(0 == strncmp("PER", &line[i], 3)) {
-			printf("PER\n");
-		}
+		else 
+			printf("Bad CST UI Type in: %s\n", line);
+
+		cst_set_label(&mods[n], &line[i]);
+		cst_print(&mods[n]);
 	}
 	else if(0 == strncmp("OCC", &line[i], 3)) {
 		make_occ(&mods[n]);
@@ -277,10 +320,15 @@ void parse_mod_line(mod *mods, char line[255]) {
 		mods[n].inputs[VCA_IN_SIG] = &mods[atoi(&line[i])];
 		while('.' != line[i++]);
 		mods[n].input_idxs[VCA_IN_SIG] = atoi(&line[i]);
-
+	}
+	else if(0 == strncmp("OUT", &line[i], 3)) {
+		make_otp(&mods[n]);
+		i += 4;
+		mods[n].inputs[OTP_IN] = &mods[atoi(&line[i])];
+		while('.' != line[i++]);
+		mods[n].input_idxs[OTP_IN] = atoi(&line[i]);
 	}
 }
-#define LINE_MAX_LEN 255
 int load_network(char *filename) {
 	FILE * f = fopen(filename, "r");
 	// Go to the last line and get the highest mod number.
@@ -399,9 +447,6 @@ void setup_network() {
 	//mods[12].input_idxs[OTP_IN] = VCF_OUT_SIG;
 }
 
-void set_mod_value(int mod_id, float val) {
-	cst_set_val(&mods[mod_id], val);
-}
 
 /*  ^^^^ 0.0 -> 1.0+  ^^^^ vvvv -32767 -> 32767 vvvv */
 
@@ -474,7 +519,7 @@ void *synth_main_loop(void *synth_data) {
 
 	load_network("layout.dat");
 
-	setup_network();
+	//setup_network();
 
 	// Init complete, signal the UI thread
 	char alive = 1;

@@ -27,7 +27,7 @@ static void high_freq_scale_set_value(GApplication *app, gpointer data) {
 	
 	sprintf(label_text, "%.2f Hz", hz);
 	gtk_label_set_text(adj->label, label_text);
-	set_mod_value(adj->mod_id, hz);
+	set_mod_cst_value(adj->mod_id, hz);
 }
 
 GtkWidget *high_freq_scale(int mod_id) {
@@ -60,7 +60,7 @@ static void low_freq_scale_set_value(GApplication *app, gpointer data) {
 	
 	sprintf(label_text, "%.2f Hz", hz);
 	gtk_label_set_text(adj->label, label_text);
-	set_mod_value(adj->mod_id, hz);
+	set_mod_cst_value(adj->mod_id, hz);
 }
 
 GtkWidget *low_freq_scale(int mod_id) {
@@ -78,9 +78,10 @@ GtkWidget *low_freq_scale(int mod_id) {
 	freq_adj->adj = adj;
 	freq_adj->label = label;
 	freq_adj->mod_id = mod_id;
-	high_freq_scale_set_value(NULL, freq_adj);
+	low_freq_scale_set_value(NULL, freq_adj);
 
 	g_signal_connect(adj, "value-changed", G_CALLBACK(low_freq_scale_set_value), freq_adj);
+	gtk_adjustment_set_value(adj, get_mod_cst_init_value(mod_id));
 	return (GtkWidget*)box;
 }
 
@@ -93,7 +94,7 @@ static void percentage_scale_set_value(GApplication *app, gpointer data) {
 	
 	sprintf(label_text, "%.2f%%", pc);
 	gtk_label_set_text(adj->label, label_text);
-	set_mod_value(adj->mod_id, pc / 100.);
+	set_mod_cst_value(adj->mod_id, pc / 100.);
 }
 
 GtkWidget *percentage_scale(int mod_id) {
@@ -103,7 +104,7 @@ GtkWidget *percentage_scale(int mod_id) {
 	GtkLabel *label = (GtkLabel*) gtk_label_new("100%");
 	gtk_box_pack_end(box, (GtkWidget*)label, 0, 1, 2);
 	
-	GtkAdjustment *adj = gtk_adjustment_new(100., 0., 100., 1.0, 1.0, 1.0);
+	GtkAdjustment *adj = gtk_adjustment_new(50., 0., 100., 1.0, 1.0, 1.0);
 	GtkWidget *scl = gtk_spin_button_new(adj, 1, 4);
 	gtk_box_pack_end(box, scl, 1, 1, 2);
 
@@ -111,9 +112,10 @@ GtkWidget *percentage_scale(int mod_id) {
 	freq_adj->adj = adj;
 	freq_adj->label = label;
 	freq_adj->mod_id = mod_id;
-	high_freq_scale_set_value(NULL, freq_adj);
+	percentage_scale_set_value(NULL, freq_adj);
 
 	g_signal_connect(adj, "value-changed", G_CALLBACK(percentage_scale_set_value), freq_adj);
+	gtk_adjustment_set_value(adj, get_mod_cst_init_value(mod_id) * 100.);
 	return (GtkWidget*)box;
 }
 
@@ -133,19 +135,19 @@ static void on_app_activate(GApplication *app, gpointer data) {
 	gtk_box_pack_start(vbox, high_freq_scale(0), 0, 1, 2);
 
 	// LFO Freq -> VCA
-	GtkLabel *l_lfo1 = (GtkLabel*) gtk_label_new("LFO Freq -> VCA");
-	gtk_box_pack_start(vbox, (GtkWidget*)l_lfo1, 0, 1, 2);
-	gtk_box_pack_start(vbox, low_freq_scale(2), 0, 1, 2);
+	//GtkLabel *l_lfo1 = (GtkLabel*) gtk_label_new("LFO Freq -> VCA");
+	//gtk_box_pack_start(vbox, (GtkWidget*)l_lfo1, 0, 1, 2);
+	//gtk_box_pack_start(vbox, low_freq_scale(2), 0, 1, 2);
 
 	// LFO -> VCA Attenuation
-	GtkLabel *l_att1 = (GtkLabel*) gtk_label_new("LFO -> VCA Attenuation");
+	GtkLabel *l_att1 = (GtkLabel*) gtk_label_new("VCA");
 	gtk_box_pack_start(vbox, (GtkWidget*)l_att1, 0, 1, 2);
-	gtk_box_pack_start(vbox, percentage_scale(4), 0, 1, 2);
+	gtk_box_pack_start(vbox, percentage_scale(2), 0, 1, 2);
 
 	// VCA Base Attenuation
-	GtkLabel *l_att2 = (GtkLabel*) gtk_label_new("VCA Base Attenuation");
-	gtk_box_pack_start(vbox, (GtkWidget*)l_att2, 0, 1, 2);
-	gtk_box_pack_start(vbox, percentage_scale(6), 0, 1, 2);
+	//GtkLabel *l_att2 = (GtkLabel*) gtk_label_new("VCA Base Attenuation");
+	//gtk_box_pack_start(vbox, (GtkWidget*)l_att2, 0, 1, 2);
+	//gtk_box_pack_start(vbox, percentage_scale(6), 0, 1, 2);
 
 //	// Base VCF Frequency
 //	GtkLabel *l_vco2 = (GtkLabel*) gtk_label_new("LP VCF");
