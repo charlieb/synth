@@ -13,8 +13,11 @@ LIBS=-lm -lasound `pkg-config --libs gtk+-3.0`
 exe: $(OBJECTS)
 	$(CC) $(CFLAGS) $(LIBS) $(OBJECTS) -o $(DEST)/$(EXE)
 
-debug: CFLAGS += -g
+debug: CFLAGS += -g -DDEBUG
 debug: exe
+
+fast: CFLAGS +=
+fast: exe
 
 profile: CFLAGS += -g -pg -O3
 profile: exe

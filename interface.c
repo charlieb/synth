@@ -121,50 +121,29 @@ GtkWidget *percentage_scale(int mod_id) {
 
 /*********************************************************/
 static void on_app_activate(GApplication *app, gpointer data) {
-	// create a new application window for the application
-  // GtkApplication is sub-class of GApplication
-  // downcast GApplication* to GtkApplication* with GTK_APPLICATION() macro
   GtkWidget *window = gtk_application_window_new(GTK_APPLICATION(app));
 
 	GtkBox *vbox = (GtkBox*)gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
 	gtk_container_add(GTK_CONTAINER(window), (GtkWidget*)vbox);
 
-	// Base VCO
-	GtkLabel *l_vco1 = (GtkLabel*) gtk_label_new("VCO");
-	gtk_box_pack_start(vbox, (GtkWidget*)l_vco1, 0, 1, 2);
-	gtk_box_pack_start(vbox, high_freq_scale(0), 0, 1, 2);
+	for(int i = 0; i < get_nmods(); i++) {
+		if(strncmp(get_mod_type(i), "CST", 3)) continue;
+		if(0 == strncmp(get_mod_cst_type(i), "NDS", 3)) continue;
 
-	// LFO Freq -> VCA
-	//GtkLabel *l_lfo1 = (GtkLabel*) gtk_label_new("LFO Freq -> VCA");
-	//gtk_box_pack_start(vbox, (GtkWidget*)l_lfo1, 0, 1, 2);
-	//gtk_box_pack_start(vbox, low_freq_scale(2), 0, 1, 2);
+		gtk_box_pack_start(vbox, gtk_label_new(get_mod_cst_label(i)), 0, 1, 2);
+		if(0 == strncmp(get_mod_cst_type(i), "HFO", 3))
+			gtk_box_pack_start(vbox, high_freq_scale(i), 0, 1, 2);
+		else if(0 == strncmp(get_mod_cst_type(i), "LFO", 3))
+			gtk_box_pack_start(vbox, low_freq_scale(i), 0, 1, 2);
+		else if(0 == strncmp(get_mod_cst_type(i), "PER", 3))
+			gtk_box_pack_start(vbox, percentage_scale(i), 0, 1, 2);
+		else
+			printf("Invalid type of CST: %c%c%c",
+				 get_mod_cst_type(i)[0],
+				 get_mod_cst_type(i)[1],
+				 get_mod_cst_type(i)[2]);
+	}
 
-	// LFO -> VCA Attenuation
-	GtkLabel *l_att1 = (GtkLabel*) gtk_label_new("VCA");
-	gtk_box_pack_start(vbox, (GtkWidget*)l_att1, 0, 1, 2);
-	gtk_box_pack_start(vbox, percentage_scale(2), 0, 1, 2);
-
-	// VCA Base Attenuation
-	//GtkLabel *l_att2 = (GtkLabel*) gtk_label_new("VCA Base Attenuation");
-	//gtk_box_pack_start(vbox, (GtkWidget*)l_att2, 0, 1, 2);
-	//gtk_box_pack_start(vbox, percentage_scale(6), 0, 1, 2);
-
-//	// Base VCF Frequency
-//	GtkLabel *l_vco2 = (GtkLabel*) gtk_label_new("LP VCF");
-//	gtk_box_pack_start(vbox, (GtkWidget*)l_vco2, 0, 1, 2);
-//	gtk_box_pack_start(vbox, high_freq_scale(0), 0, 1, 2);
-
-//	// LFO -> VCF Attenuation
-//	GtkLabel *l_att2 = (GtkLabel*) gtk_label_new("LFO -> VCA Attenuation");
-//	gtk_box_pack_start(vbox, (GtkWidget*)l_att2, 0, 1, 2);
-//	gtk_box_pack_start(vbox, percentage_scale(4), 0, 1, 2);
-
-	// LFO -> VCF
-//	GtkLabel *l_lfo2 = (GtkLabel*) gtk_label_new("LFO -> VCF");
-//	gtk_box_pack_start(vbox, (GtkWidget*)l_lfo2, 0, 1, 2);
-//	gtk_box_pack_start(vbox, low_freq_scale(7), 0, 1, 2);
-
-	// display the window
 	gtk_widget_show_all(GTK_WIDGET(window));
 }
 

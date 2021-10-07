@@ -13,4 +13,6 @@ char* get_mod_cst_label(int mod_id);
 char* get_mod_cst_type(int mod_id);
 float get_mod_cst_init_value(int mod_id);
 
+char *get_mod_type(int mod_id);
+int get_nmods();
 #endif

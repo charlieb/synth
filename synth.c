@@ -10,15 +10,21 @@
 #ifndef M_PI
 #define M_PI 3.14159365359879323846
 #define M_2PI 6.28318530718
+#define M_PI2 1.57079632679
 #endif
 #ifndef alloca
 #define alloca(x)  __builtin_alloca(x)
 #endif
 
-#define debug_print(fmt, ...) \
-	do { if(DEBUG) printf(fmt, __VA_ARGS__); } while(0)
 
-#define DEBUG 0
+#ifdef DEBUG
+#define DEBUG_VAL 1
+#else
+#define DEBUG_VAL 0
+#endif
+
+#define debug_print(fmt, ...) \
+	do { if(DEBUG_VAL) printf(fmt, __VA_ARGS__); } while(0)
 
 #define LINE_MAX_LEN 255
 
@@ -30,6 +36,7 @@ snd_pcm_uframes_t frames;
 
 /*************************/
 typedef struct mod {
+	char type[3];
 	struct mod **inputs;
 	int *input_idxs;
 	float *outputs;
@@ -61,6 +68,7 @@ void cst_tick(mod *m) {
 	m->outputs[CST_OUT_VAL] = ((cst_data*)m->data)->val;
 }
 int make_cst(mod *m) {
+	memcpy(m->type, "CST", 3);
 	m->outputs = malloc(sizeof(float));
 	m->tick = &cst_tick;
 	m->data = malloc(sizeof(cst_data));
@@ -102,6 +110,10 @@ char* get_mod_cst_type(int mod_id) {
 float get_mod_cst_init_value(int mod_id) {
 	return ((cst_data*)mods[mod_id].data)->init_val;
 }
+char *get_mod_type(int mod_id) {
+	return mods[mod_id].type;
+}
+int get_nmods() { return nmods; }
 
 #define FAD_IN_SIG1 0
 #define FAD_IN_SIG2 1
@@ -116,6 +128,7 @@ void fad_tick(mod *m) {
 	m->outputs[FAD_OUT_VAL] = out;
 }
 int make_fad(mod *m) {
+	memcpy(m->type, "FAD", 3);
 	m->inputs = malloc(3 * sizeof(mod*));
 	m->input_idxs = malloc(3 * sizeof(int));
 	m->outputs = malloc(sizeof(float));
@@ -133,6 +146,7 @@ void add_tick(mod *m) {
 	m->outputs[ADD_OUT_VAL] = a1 + a2;
 }
 int make_add(mod *m) {
+	memcpy(m->type, "ADD", 3);
 	m->inputs = malloc(2 * sizeof(mod*));
 	m->input_idxs = malloc(2 * sizeof(int));
 	m->outputs = malloc(sizeof(float));
@@ -150,16 +164,27 @@ void occ_tick(mod *m) {
 
 	float phase = *(float*)m->data;
 	phase += freq_in * M_2PI / (float)rate;
+	phase += ((phase >= M_2PI) * -M_2PI) + ((phase < 0.0) * M_2PI);
+	//printf("%f %f %f\n", freq_in, freq_in * M_2PI / (float)rate, phase);
 	*(float*)m->data = phase;
 
-	//printf("%f\n", phase);
-	phase += ((phase >= M_2PI) * -M_2PI) + ((phase < 0.0) * M_2PI);
-	float sample = 0.5 + 0.5 * sin(phase);
+	float sample_sin = 0.5 + 0.5 * sin(phase);
+	float sample_tri = 0.5 + 0.5 * (
+			((phase >= M_PI2 && phase < 3 * M_PI2) * (1. - (phase - M_PI2) / M_PI)) +
+			((phase < M_PI2) * phase / M_PI2) +
+			((phase >= 3 * M_PI2) * (1. - (phase - 3. * M_PI2) / M_PI2)));
+	float sample_saw = phase / M_2PI;
+	float sample_squ = (phase >= M_PI2 && phase < 3 * M_PI2);
+
 	//float sample = 0.5 + 0.5 * sin(theta * freq_in);
-	debug_print("OCC %p - %f @ %f = %f\n", (void*)m, phase, freq_in, sample);
-	m->outputs[OCC_OUT_SIN] = sample;
+	debug_print("OCC %p - %f @ %f = sin %f, tri %f\n", (void*)m, phase, freq_in, sample_sin, sample_tri);
+	m->outputs[OCC_OUT_SIN] = sample_sin;
+	m->outputs[OCC_OUT_TRI] = sample_tri;
+	m->outputs[OCC_OUT_SAW] = sample_saw;
+	m->outputs[OCC_OUT_SQU] = sample_squ;
 }
 int make_occ(mod *m) {
+	memcpy(m->type, "OCC", 3);
 	m->inputs = malloc(sizeof(mod*));
 	m->input_idxs = malloc(sizeof(int));
 	m->outputs = malloc(4 * sizeof(float));
@@ -180,6 +205,7 @@ void vca_tick(mod *m) {
 	m->outputs[VCA_OUT_SIG] = in_cv * in_sig;
 }
 int make_vca(mod *m) {
+	memcpy(m->type, "VCA", 3);
 	m->inputs = malloc(2 * sizeof(mod*));
 	m->input_idxs = malloc(2 * sizeof(int));
 	m->outputs = malloc(sizeof(float));
@@ -217,6 +243,7 @@ void vcf_tick(mod *m) {
 	m->outputs[VCF_OUT_SIG] = data->sn[vcf_stages -1];
 }
 int make_vcf(mod *m) {
+	memcpy(m->type, "VCF", 3);
 	m->inputs = malloc(3 * sizeof(mod*));
 	m->input_idxs = malloc(3 * sizeof(int));
 	m->outputs = malloc(sizeof(float));
@@ -255,6 +282,7 @@ void otp_tick(mod *m) {
 	}
 }
 int make_otp(mod *m) {
+	memcpy(m->type, "OTP", 3);
 	m->inputs = malloc(sizeof(mod*));
 	m->input_idxs = malloc(sizeof(int));
 	m->outputs = NULL;
@@ -291,7 +319,8 @@ void parse_mod_line(mod *mods, char line[LINE_MAX_LEN]) {
 
 		if(0 == strncmp("HFO", &line[i], 3) ||
 			 0 == strncmp("LFO", &line[i], 3) ||
-		   0 == strncmp("PER", &line[i], 3)) {
+			 0 == strncmp("PER", &line[i], 3) ||
+		   0 == strncmp("NDS", &line[i], 3)) {
 			cst_set_type(&mods[n], &line[i]);
 			i += 4;
 		}
@@ -301,31 +330,63 @@ void parse_mod_line(mod *mods, char line[LINE_MAX_LEN]) {
 		cst_set_label(&mods[n], &line[i]);
 		cst_print(&mods[n]);
 	}
+	else if(0 == strncmp("ADD", &line[i], 3)) {
+		make_add(&mods[n]);
+		i += 4;
+		mods[n].inputs[ADD_IN1] = &mods[atoi(&line[i])];
+		while('/' != line[i++]);
+		mods[n].input_idxs[ADD_IN1] = atoi(&line[i]);
+
+		while(isdigit(line[i++]));
+
+		mods[n].inputs[ADD_IN2] = &mods[atoi(&line[i])];
+		while('/' != line[i++]);
+		mods[n].input_idxs[ADD_IN2] = atoi(&line[i]);
+	}
+	else if(0 == strncmp("FAD", &line[i], 3)) {
+		make_fad(&mods[n]);
+		i += 4;
+		mods[n].inputs[FAD_IN_SIG1] = &mods[atoi(&line[i])];
+		while('/' != line[i++]);
+		mods[n].input_idxs[FAD_IN_SIG1] = atoi(&line[i]);
+
+		while(isdigit(line[i++]));
+
+		mods[n].inputs[FAD_IN_SIG2] = &mods[atoi(&line[i])];
+		while('/' != line[i++]);
+		mods[n].input_idxs[FAD_IN_SIG2] = atoi(&line[i]);
+
+		while(isdigit(line[i++]));
+
+		mods[n].inputs[FAD_IN_MIX] = &mods[atoi(&line[i])];
+		while('/' != line[i++]);
+		mods[n].input_idxs[FAD_IN_MIX] = atoi(&line[i]);
+	}
 	else if(0 == strncmp("OCC", &line[i], 3)) {
 		make_occ(&mods[n]);
 		i += 4;
 		mods[n].inputs[OCC_IN_FREQ] = &mods[atoi(&line[i])];
-		while('.' != line[i++]);
+		while('/' != line[i++]);
 		mods[n].input_idxs[OCC_IN_FREQ] = atoi(&line[i]);
 	}
 	else if(0 == strncmp("VCA", &line[i], 3)) {
 		make_vca(&mods[n]);
 		i += 4;
 		mods[n].inputs[VCA_IN_CV] = &mods[atoi(&line[i])];
-		while('.' != line[i++]);
+		while('/' != line[i++]);
 		mods[n].input_idxs[VCA_IN_CV] = atoi(&line[i]);
 
 		while(isdigit(line[i++]));
 
 		mods[n].inputs[VCA_IN_SIG] = &mods[atoi(&line[i])];
-		while('.' != line[i++]);
+		while('/' != line[i++]);
 		mods[n].input_idxs[VCA_IN_SIG] = atoi(&line[i]);
 	}
 	else if(0 == strncmp("OUT", &line[i], 3)) {
 		make_otp(&mods[n]);
 		i += 4;
 		mods[n].inputs[OTP_IN] = &mods[atoi(&line[i])];
-		while('.' != line[i++]);
+		while('/' != line[i++]);
 		mods[n].input_idxs[OTP_IN] = atoi(&line[i]);
 	}
 }
@@ -531,7 +592,7 @@ void *synth_main_loop(void *synth_data) {
 	float sound_secs;
 	struct timespec start, now, elapsed, pause, sound;
 	long nano = 1000000000;
-	long max_sync_diff = 0.25 * nano;
+	long max_sync_diff = 0.1 * nano;
 
 	clock_gettime(CLOCK_REALTIME, &start);
 
