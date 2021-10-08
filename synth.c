@@ -498,6 +498,10 @@ void init_pcm() {
 	printf("rate: %d bps\n", tmp);
 
 	snd_pcm_hw_params_get_period_size(params, &frames, 0);
+	unsigned int period_time;
+	int dir;
+	snd_pcm_hw_params_get_period_time(params, &period_time, &dir);
+	printf("Need %lu frames in %ums\n", frames, period_time);
 }
 
 // NB does not work when b > a, it needs to underflow into the second part.
@@ -543,6 +547,8 @@ void *synth_main_loop(void *synth_data) {
 		sound.tv_sec = (time_t)sound_secs;
 		sound.tv_nsec = (long)((sound_secs - floor(sound_secs)) * (float)nano);
 		timespec_diff(&sound, &elapsed, &pause);
+		printf("calced %fsecs of sound in %lisec and %lins\n",
+				sound_secs, elapsed.tv_sec, elapsed.tv_nsec);
 
 		if(pause.tv_sec > 3) {
 			printf("Clock too far out of sync\n");
@@ -550,6 +556,7 @@ void *synth_main_loop(void *synth_data) {
 		}
 		if(pause.tv_nsec > max_sync_diff) {
 			pause.tv_nsec -= max_sync_diff / 2;
+			printf("Sleep for %lins\n", pause.tv_nsec);
 			nanosleep(&pause, NULL);
 		}
 
