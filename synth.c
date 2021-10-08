@@ -27,6 +27,7 @@
 	do { if(DEBUG_VAL) printf(fmt, __VA_ARGS__); } while(0)
 
 #define LINE_MAX_LEN 255
+#define NANO 1000000000
 
 unsigned int rate = 44100; // samples per second
 
@@ -504,10 +505,18 @@ void init_pcm() {
 	printf("Need %lu frames in %ums\n", frames, period_time);
 }
 
-// NB does not work when b > a, it needs to underflow into the second part.
+long long int timespec_to_nsecs(struct timespec *t) {
+	return (long long int)t->tv_sec * (long long int)NANO +
+	 	(long long int)t->tv_nsec;
+}
+void nsecs_to_timespec(long long int nsecs, struct timespec *t) {
+	t->tv_sec = nsecs / NANO;
+	t->tv_nsec = nsecs % NANO;
+}
+// When b > a both the seconds and nanoseconds part will be -ve
 static inline void timespec_diff(struct timespec *a, struct timespec *b, struct timespec *result) {
-    result->tv_sec = a->tv_sec - b->tv_sec;
-    result->tv_nsec = a->tv_nsec - b->tv_nsec;
+	long long int result_nsecs = timespec_to_nsecs(a) - timespec_to_nsecs(b);
+	nsecs_to_timespec(result_nsecs, result);
 }
 
 void *synth_main_loop(void *synth_data) {
@@ -529,8 +538,7 @@ void *synth_main_loop(void *synth_data) {
 	uint32_t frames_calced = 0;
 	float sound_secs;
 	struct timespec start, now, elapsed, pause, sound;
-	long nano = 1000000000;
-	long max_sync_diff = 0.1 * nano;
+	long int max_sync_diff = 0.1 * NANO;
 
 	clock_gettime(CLOCK_REALTIME, &start);
 
@@ -545,10 +553,10 @@ void *synth_main_loop(void *synth_data) {
 		
 		sound_secs = (float)frames_calced / (float)rate;
 		sound.tv_sec = (time_t)sound_secs;
-		sound.tv_nsec = (long)((sound_secs - floor(sound_secs)) * (float)nano);
+		sound.tv_nsec = (long)((sound_secs - floor(sound_secs)) * (float)NANO);
 		timespec_diff(&sound, &elapsed, &pause);
-		printf("calced %fsecs of sound in %lisec and %lins\n",
-				sound_secs, elapsed.tv_sec, elapsed.tv_nsec);
+		//printf("calced %fsecs of sound in %fsecs\n",
+		//		sound_secs, (float)elapsed.tv_sec + (float)elapsed.tv_nsec / (float)NANO);
 
 		if(pause.tv_sec > 3) {
 			printf("Clock too far out of sync\n");
@@ -556,7 +564,9 @@ void *synth_main_loop(void *synth_data) {
 		}
 		if(pause.tv_nsec > max_sync_diff) {
 			pause.tv_nsec -= max_sync_diff / 2;
-			printf("Sleep for %lins\n", pause.tv_nsec);
+			debug_print("Audio calculation too far ahead sleep for %li = %fs\n",
+					pause.tv_nsec,
+				 	(float)pause.tv_nsec / (float)NANO);
 			nanosleep(&pause, NULL);
 		}
 
