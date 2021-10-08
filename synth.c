@@ -170,15 +170,16 @@ void occ_tick(mod *m) {
 	*(float*)m->data = phase;
 
 	float sample_sin = 0.5 + 0.5 * sin(phase);
-	float sample_tri = 0.5 + 0.5 * (
+	float sample_tri = (
 			((phase >= M_PI2 && phase < 3 * M_PI2) * (1. - (phase - M_PI2) / M_PI)) +
 			((phase < M_PI2) * phase / M_PI2) +
-			((phase >= 3 * M_PI2) * (1. - (phase - 3. * M_PI2) / M_PI2)));
+			((phase >= 3 * M_PI2) * (phase - 3. * M_PI2) / M_PI2));
 	float sample_saw = phase / M_2PI;
 	float sample_squ = (phase >= M_PI2 && phase < 3 * M_PI2);
 
 	//float sample = 0.5 + 0.5 * sin(theta * freq_in);
-	debug_print("OCC %p - %f @ %f = sin %f, tri %f\n", (void*)m, phase, freq_in, sample_sin, sample_tri);
+	debug_print("OCC %p - %f @ %f = sin %f, tri %f, saw %f, squ %f\n",
+		 	(void*)m, phase, freq_in, sample_sin, sample_tri, sample_saw, sample_squ);
 	m->outputs[OCC_OUT_SIN] = sample_sin;
 	m->outputs[OCC_OUT_TRI] = sample_tri;
 	m->outputs[OCC_OUT_SAW] = sample_saw;
