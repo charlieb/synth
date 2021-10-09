@@ -251,7 +251,9 @@ void vcf_tick(mod *m) {
 		data->snm1[i] = tmp;
 	}
 	tmp = data->sn[0];
-	data->sn[0] = sig * cut + data->snm1[0] * (1.0f - cut) + data->snm1[vcf_stages-1] * res;
+	data->sn[0] = sig * cut + data->snm1[0] * (1.0f - cut) + 
+		            data->snm1[vcf_stages-1] * res * -1. * cut;
+	data->snm1[0] = tmp;
 
 	debug_print("VCF cut %f, res %f, sig %f = %f\n", cut, res, sig,
 			data->sn[vcf_stages -1]);
