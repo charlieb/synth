@@ -30,10 +30,25 @@
 #define NANO 1000000000
 
 unsigned int rate = 44100; // samples per second
+struct timespec start_time;
 
 snd_pcm_t *pcm_handle;
 snd_pcm_hw_params_t *params;
 snd_pcm_uframes_t frames;
+
+long long int timespec_to_nsecs(struct timespec *t) {
+	return (long long int)t->tv_sec * (long long int)NANO +
+	 	(long long int)t->tv_nsec;
+}
+void nsecs_to_timespec(long long int nsecs, struct timespec *t) {
+	t->tv_sec = nsecs / NANO;
+	t->tv_nsec = nsecs % NANO;
+}
+// When b > a both the seconds and nanoseconds part will be -ve
+static inline void timespec_diff(struct timespec *a, struct timespec *b, struct timespec *result) {
+	long long int result_nsecs = timespec_to_nsecs(a) - timespec_to_nsecs(b);
+	nsecs_to_timespec(result_nsecs, result);
+}
 
 /*************************/
 typedef struct mod {
@@ -263,14 +278,23 @@ typedef struct otp_data {
 	int16_t *ibuf;
 	int i;
 } otp_data;
+struct timespec last_dump;
 void otp_tick(mod *m) {
 	unsigned int pcm;
 	float in = get_input(m, OTP_IN);
 	otp_data *data = (otp_data*)m->data;
 	data->fbuf[data->i++] = in;
 
+	//struct timespec now, elapsed;
+
 	// Time to dump the data into the audio buffer?
 	if(data->i == frames) {
+		//clock_gettime(CLOCK_REALTIME, &now);
+		//timespec_diff(&now, &start_time, &elapsed);
+		//printf("Dump at %fsecs\n", (float)elapsed.tv_sec + (float)elapsed.tv_nsec / (float)NANO);
+		//timespec_diff(&now, &last_dump, &elapsed);
+		//printf("Last dump %fsecs ago\n", (float)elapsed.tv_sec + (float)elapsed.tv_nsec / (float)NANO);
+		//memcpy(&last_dump, &now, sizeof(struct timespec));
 		for(int i = 0; i < frames; i++) {
 			data->ibuf[i] = (int16_t)(data->fbuf[i] * 32767.0f);
 			//printf("%f -> %i\n", data->fbuf[i], data->ibuf[i]);
@@ -503,21 +527,7 @@ void init_pcm() {
 	unsigned int period_time;
 	int dir;
 	snd_pcm_hw_params_get_period_time(params, &period_time, &dir);
-	printf("Need %lu frames in %ums\n", frames, period_time);
-}
-
-long long int timespec_to_nsecs(struct timespec *t) {
-	return (long long int)t->tv_sec * (long long int)NANO +
-	 	(long long int)t->tv_nsec;
-}
-void nsecs_to_timespec(long long int nsecs, struct timespec *t) {
-	t->tv_sec = nsecs / NANO;
-	t->tv_nsec = nsecs % NANO;
-}
-// When b > a both the seconds and nanoseconds part will be -ve
-static inline void timespec_diff(struct timespec *a, struct timespec *b, struct timespec *result) {
-	long long int result_nsecs = timespec_to_nsecs(a) - timespec_to_nsecs(b);
-	nsecs_to_timespec(result_nsecs, result);
+	printf("Need %lu frames in %uus\n", frames, period_time);
 }
 
 void *synth_main_loop(void *synth_data) {
@@ -525,6 +535,9 @@ void *synth_main_loop(void *synth_data) {
 	synth_thread_data *thread_data = (synth_thread_data*)synth_data;
 
 	init_pcm();
+	unsigned int period_time; // microseconds
+	int dir;
+	snd_pcm_hw_params_get_period_time(params, &period_time, &dir);
 
 	load_network("layout.dat");
 
@@ -538,10 +551,10 @@ void *synth_main_loop(void *synth_data) {
 
 	uint32_t frames_calced = 0;
 	float sound_secs;
-	struct timespec start, now, elapsed, pause, sound;
-	long int max_sync_diff = 0.1 * NANO;
+	struct timespec now, elapsed, pause, sound;
+	long int max_sync_diff = 3 * period_time * 1000; // convert to nanoseconds
 
-	clock_gettime(CLOCK_REALTIME, &start);
+	clock_gettime(CLOCK_REALTIME, &start_time);
 
 	while(alive) {
 	
@@ -550,7 +563,7 @@ void *synth_main_loop(void *synth_data) {
 
 		frames_calced++;
 		clock_gettime(CLOCK_REALTIME, &now);
-		timespec_diff(&now, &start, &elapsed);
+		timespec_diff(&now, &start_time, &elapsed);
 		
 		sound_secs = (float)frames_calced / (float)rate;
 		sound.tv_sec = (time_t)sound_secs;
@@ -564,8 +577,12 @@ void *synth_main_loop(void *synth_data) {
 			abort();
 		}
 		if(pause.tv_nsec > max_sync_diff) {
-			pause.tv_nsec -= max_sync_diff / 2;
-			debug_print("Audio calculation too far ahead sleep for %li = %fs\n",
+			//printf("calced %fsecs of sound in %fsecs\n",
+			//		sound_secs, (float)elapsed.tv_sec + (float)elapsed.tv_nsec / (float)NANO);
+			// Always leave 2 periods in the output buffer
+			// This avoids the possibility of sleeping through the buffer interupt
+			pause.tv_nsec -=  2 * max_sync_diff / 3;
+			printf("Audio calculation too far ahead sleep for %li = %fs\n",
 					pause.tv_nsec,
 				 	(float)pause.tv_nsec / (float)NANO);
 			nanosleep(&pause, NULL);
