@@ -185,10 +185,8 @@ void occ_tick(mod *m) {
 	*(float*)m->data = phase;
 
 	float sample_sin = 0.5 + 0.5 * sin(phase);
-	float sample_tri = (
-			((phase >= M_PI2 && phase < 3 * M_PI2) * (1. - (phase - M_PI2) / M_PI)) +
-			((phase < M_PI2) * phase / M_PI2) +
-			((phase >= 3 * M_PI2) * (phase - 3. * M_PI2) / M_PI2));
+	float sample_tri = ((phase < M_PI) * phase / M_PI) +
+										 ((phase >= M_PI) * (2. - phase / M_PI));
 	float sample_saw = phase / M_2PI;
 	float sample_squ = (phase >= M_PI2 && phase < 3 * M_PI2);
 
