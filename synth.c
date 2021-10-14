@@ -272,6 +272,64 @@ int make_vcf(mod *m) {
 	return 0;
 }
 
+#define ENV_IN_A 0
+#define ENV_IN_D 1
+#define ENV_IN_S 2
+#define ENV_IN_R 3
+#define ENV_IN_GATE 4
+#define ENV_OUT 0
+typedef struct env_data {
+	int ticks_since_gate_high;
+	int ticks_since_gate_low;
+} env_data;
+void env_tick(mod *m) {
+	float in_a = get_input(m, ENV_IN_A) + 0.00001; // prevent x/0
+	float in_d = get_input(m, ENV_IN_D) + 0.00001;
+	float in_s = get_input(m, ENV_IN_S);
+	float in_r = get_input(m, ENV_IN_R) + 0.00001;
+	float gate = get_input(m, ENV_IN_GATE);
+
+	// Start with just linear AD
+	env_data *data = (env_data*)m->data;
+	// last edge was falling
+	if(data->ticks_since_gate_low < data->ticks_since_gate_high) {
+		if(gate >= 0.9) { // Just got a rising edge
+			data->ticks_since_gate_high = 0;
+			m->outputs[ENV_OUT] = 0.0;
+		} else { // Falling output
+			float t = (float)data->ticks_since_gate_low / (float)rate;
+			m->outputs[ENV_OUT] = (t < in_r) * (1. - (t / in_r));
+		}
+	} else { // last edge was rising
+		if(gate <= 0.1) { // Just got a falling edge
+			data->ticks_since_gate_low = 0;
+		} else { // Rising output
+			float t = (float)data->ticks_since_gate_high / (float)rate;
+			m->outputs[ENV_OUT] = (t < in_a) * (t / in_a) + (t > in_a) * 1.;
+		}
+	}
+	data->ticks_since_gate_high++;
+	data->ticks_since_gate_low++;
+	
+	debug_print("ENV %p - ->0 %i  ->1 %i, gate = %f,  ADSR = [%f %f %f %f] -> %f\n", 
+			(void*)m,
+			data->ticks_since_gate_low,
+			data->ticks_since_gate_high,
+			gate,
+			in_a, in_d, in_s, in_r,
+			m->outputs[ENV_OUT]
+			);
+}
+int make_env(mod *m) {
+	memcpy(m->type, "ENV", 3);
+	m->inputs = malloc(5 * sizeof(mod*));
+	m->input_idxs = malloc(5 * sizeof(int));
+	m->outputs = malloc(sizeof(float));
+	m->data = malloc(sizeof(env_data));
+	m->tick = &env_tick;
+	return 0;
+}
+
 #define OTP_IN 0
 typedef struct otp_data {
 	float *fbuf;
@@ -332,6 +390,13 @@ void freadline(char line[LINE_MAX_LEN], FILE *f) {
 	while(line[i] != '\n') 
 		line[++i] = fgetc(f);
 }
+void parse_input(mod *mods, int m, int input, char *line, int *pos) {
+		mods[m].inputs[input] = &mods[atoi(&line[*pos])];
+		while('/' != line[(*pos)++]);
+		mods[m].input_idxs[input] = atoi(&line[*pos]);
+
+		while(isdigit(line[(*pos)++]));
+}
 void parse_mod_line(mod *mods, char line[LINE_MAX_LEN]) {
 	int i = 0;
 	int n = atoi(line);
@@ -360,80 +425,47 @@ void parse_mod_line(mod *mods, char line[LINE_MAX_LEN]) {
 	else if(0 == strncmp("ADD", &line[i], 3)) {
 		make_add(&mods[n]);
 		i += 4;
-		mods[n].inputs[ADD_IN1] = &mods[atoi(&line[i])];
-		while('/' != line[i++]);
-		mods[n].input_idxs[ADD_IN1] = atoi(&line[i]);
-
-		while(isdigit(line[i++]));
-
-		mods[n].inputs[ADD_IN2] = &mods[atoi(&line[i])];
-		while('/' != line[i++]);
-		mods[n].input_idxs[ADD_IN2] = atoi(&line[i]);
+		parse_input(mods, n, ADD_IN1, line, &i);
+		parse_input(mods, n, ADD_IN2, line, &i);
 	}
 	else if(0 == strncmp("FAD", &line[i], 3)) {
 		make_fad(&mods[n]);
 		i += 4;
-		mods[n].inputs[FAD_IN_SIG1] = &mods[atoi(&line[i])];
-		while('/' != line[i++]);
-		mods[n].input_idxs[FAD_IN_SIG1] = atoi(&line[i]);
-
-		while(isdigit(line[i++]));
-
-		mods[n].inputs[FAD_IN_SIG2] = &mods[atoi(&line[i])];
-		while('/' != line[i++]);
-		mods[n].input_idxs[FAD_IN_SIG2] = atoi(&line[i]);
-
-		while(isdigit(line[i++]));
-
-		mods[n].inputs[FAD_IN_MIX] = &mods[atoi(&line[i])];
-		while('/' != line[i++]);
-		mods[n].input_idxs[FAD_IN_MIX] = atoi(&line[i]);
+		parse_input(mods, n, FAD_IN_SIG1, line, &i);
+		parse_input(mods, n, FAD_IN_SIG2, line, &i);
+		parse_input(mods, n, FAD_IN_MIX, line, &i);
 	}
 	else if(0 == strncmp("OCC", &line[i], 3)) {
 		make_occ(&mods[n]);
 		i += 4;
-		mods[n].inputs[OCC_IN_FREQ] = &mods[atoi(&line[i])];
-		while('/' != line[i++]);
-		mods[n].input_idxs[OCC_IN_FREQ] = atoi(&line[i]);
+		parse_input(mods, n, OCC_IN_FREQ, line, &i);
 	}
 	else if(0 == strncmp("VCA", &line[i], 3)) {
 		make_vca(&mods[n]);
 		i += 4;
-		mods[n].inputs[VCA_IN_CV] = &mods[atoi(&line[i])];
-		while('/' != line[i++]);
-		mods[n].input_idxs[VCA_IN_CV] = atoi(&line[i]);
-
-		while(isdigit(line[i++]));
-
-		mods[n].inputs[VCA_IN_SIG] = &mods[atoi(&line[i])];
-		while('/' != line[i++]);
-		mods[n].input_idxs[VCA_IN_SIG] = atoi(&line[i]);
+		parse_input(mods, n, VCA_IN_CV, line, &i);
+		parse_input(mods, n, VCA_IN_SIG, line, &i);
 	}
 	else if(0 == strncmp("VCF", &line[i], 3)) {
 		make_vcf(&mods[n]);
 		i += 4;
-		mods[n].inputs[VCF_IN_CUT] = &mods[atoi(&line[i])];
-		while('/' != line[i++]);
-		mods[n].input_idxs[VCF_IN_CUT] = atoi(&line[i]);
-
-		while(isdigit(line[i++]));
-
-		mods[n].inputs[VCF_IN_RES] = &mods[atoi(&line[i])];
-		while('/' != line[i++]);
-		mods[n].input_idxs[VCF_IN_RES] = atoi(&line[i]);
-
-		while(isdigit(line[i++]));
-
-		mods[n].inputs[VCF_IN_SIG] = &mods[atoi(&line[i])];
-		while('/' != line[i++]);
-		mods[n].input_idxs[VCF_IN_SIG] = atoi(&line[i]);
+		parse_input(mods, n, VCF_IN_CUT, line, &i);
+		parse_input(mods, n, VCF_IN_RES, line, &i);
+		parse_input(mods, n, VCF_IN_SIG, line, &i);
+	}
+	else if(0 == strncmp("ENV", &line[i], 3)) {
+		make_env(&mods[n]);
+		i += 4;
+		parse_input(mods, n, ENV_IN_A, line, &i);
+		parse_input(mods, n, ENV_IN_D, line, &i);
+		parse_input(mods, n, ENV_IN_S, line, &i);
+		parse_input(mods, n, ENV_IN_R, line, &i);
+		parse_input(mods, n, ENV_IN_GATE, line, &i);
 	}
 	else if(0 == strncmp("OUT", &line[i], 3)) {
 		make_otp(&mods[n]);
 		i += 4;
-		mods[n].inputs[OTP_IN] = &mods[atoi(&line[i])];
-		while('/' != line[i++]);
-		mods[n].input_idxs[OTP_IN] = atoi(&line[i]);
+		parse_input(mods, n, OTP_IN, line, &i);
 	}
 	else
 		printf("Bad module type in: %s\n", line);

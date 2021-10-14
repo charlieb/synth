@@ -1,0 +1,14 @@
+0 CST 260.5 HFO VCO Freq
+1 OCC 0/0
+2 CST 1.0 LFO LFO Freq
+3 OCC 2/0
+4 CST 1.0 NDS Base for Fader
+5 CST 0.5 PER LFO -> VCF Cutoff Attenuation
+6 FAD 4/0 3/1 5/0
+7 CST 0.0 PER VCF Resonance
+8 VCF 6/0 7/0 1/3
+9 CST 1.0 NDS Base for Fader
+10 CST 0.5 PER LFO -> VCA Attenuation
+11 FAD 9/0 3/1 10/0
+12 VCA 11/0 8/0
+13 OUT 12/0
